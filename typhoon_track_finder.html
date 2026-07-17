@@ -1,0 +1,1566 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台風トレース検索 | Track Similarity Console</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0f16;
+    --panel:#0f1720;
+    --panel-2:#131e2a;
+    --line:#1e2c3a;
+    --text:#c9d6e2;
+    --text-dim:#7488a0;
+    --cyan:#4fd8cf;
+    --amber:#e8a33d;
+    --magenta:#e8608a;
+    --danger:#e0546a;
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:var(--bg); color:var(--text);
+    font-family:'JetBrains Mono', monospace;
+    font-size:13px;
+    overflow:hidden;
+  }
+  h1,h2,h3{ font-family:'Space Grotesk', sans-serif; margin:0; letter-spacing:.02em;}
+
+  #app{ display:grid; grid-template-columns: 340px 1fr; height:100vh; }
+
+  /* ---------- Sidebar ---------- */
+  #sidebar{
+    background:var(--panel);
+    border-right:1px solid var(--line);
+    display:flex; flex-direction:column;
+    overflow-y:auto;
+  }
+  #brand{
+    padding:18px 18px 14px;
+    border-bottom:1px solid var(--line);
+    position:relative;
+  }
+  #brand .sweep{
+    position:absolute; top:18px; right:18px;
+    width:26px; height:26px; border-radius:50%;
+    border:1px solid var(--cyan); opacity:.5;
+  }
+  #brand .sweep::after{
+    content:''; position:absolute; top:50%; left:50%; width:11px; height:1px;
+    background:var(--cyan); transform-origin:0 0; animation: sweep 3.2s linear infinite;
+  }
+  @keyframes sweep{ from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
+  #brand h1{ font-size:16px; color:#eef4f9; }
+  #brand .sub{ color:var(--text-dim); font-size:11px; margin-top:4px; letter-spacing:.06em; text-transform:uppercase;}
+
+  .section{ padding:14px 18px; border-bottom:1px solid var(--line); }
+  .section h2{ font-size:11px; color:var(--cyan); text-transform:uppercase; letter-spacing:.08em; margin-bottom:10px;}
+  .hint{ color:var(--text-dim); font-size:11.5px; line-height:1.6; }
+  .row{ display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;}
+
+  button{
+    font-family:'JetBrains Mono', monospace;
+    background:var(--panel-2); color:var(--text);
+    border:1px solid var(--line); border-radius:var(--radius);
+    padding:8px 10px; font-size:12px; cursor:pointer;
+    transition:border-color .15s, color .15s;
+  }
+  button:hover{ border-color:var(--cyan); color:#eef4f9; }
+  button.primary{ background:var(--cyan); color:#06171a; border-color:var(--cyan); font-weight:700;}
+  button.primary:hover{ opacity:.9; }
+  button.danger:hover{ border-color:var(--danger); color:var(--danger); }
+  button:disabled{ opacity:.35; cursor:not-allowed; }
+  button:disabled:hover{ border-color:var(--line); color:var(--text); }
+
+  input[type=file]{ display:none; }
+  label.filebtn{
+    display:inline-block; font-size:12px; padding:8px 10px;
+    background:var(--panel-2); border:1px dashed var(--line); border-radius:var(--radius);
+    cursor:pointer; color:var(--text-dim); width:100%; text-align:center;
+  }
+  label.filebtn:hover{ border-color:var(--cyan); color:var(--cyan); }
+
+  .status-line{ display:flex; justify-content:space-between; font-size:11.5px; color:var(--text-dim); margin-top:6px;}
+  .status-line b{ color:var(--text); font-weight:500;}
+
+  .toggle{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-dim); margin-top:10px; cursor:pointer; user-select:none;}
+  .toggle input{ accent-color:var(--cyan); }
+
+  .filter-field{ margin-top:10px; }
+  .filter-field label{ display:block; font-size:11.5px; color:var(--text-dim); margin-bottom:4px; }
+  .filter-field .field-row{ display:flex; align-items:center; gap:6px; }
+  .filter-field input[type=number], .filter-field select{
+    font-family:'JetBrains Mono', monospace;
+    background:var(--panel-2); color:var(--text);
+    border:1px solid var(--line); border-radius:var(--radius);
+    padding:7px 8px; font-size:12px; flex:1; width:100%;
+  }
+  .filter-field input[type=number]:focus, .filter-field select:focus{ outline:none; border-color:var(--cyan); }
+  .filter-field .unit{ font-size:11.5px; color:var(--text-dim); white-space:nowrap; }
+
+  #results{ flex:1; overflow-y:auto; }
+  .result-item{
+    padding:10px 18px; border-bottom:1px solid var(--line); cursor:pointer;
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .result-item:hover{ background:var(--panel-2); }
+  .result-item.active{ background:var(--panel-2); border-left:2px solid var(--cyan); }
+  .result-top{ display:flex; justify-content:space-between; align-items:baseline; }
+  .result-name{ color:#eef4f9; font-weight:700; font-size:13px; }
+  .result-year{ color:var(--text-dim); font-size:11px; }
+  .result-score{ font-size:11px; color:var(--amber); }
+  .result-right{ display:flex; align-items:center; gap:8px; }
+  .detail-link{
+    font-size:13px; text-decoration:none; opacity:.6; line-height:1;
+    transition:opacity .15s;
+  }
+  .detail-link:hover{ opacity:1; }
+  .bar-track{ height:3px; background:var(--line); border-radius:2px; overflow:hidden; }
+  .bar-fill{ height:100%; background:var(--cyan); }
+  .result-meta{ font-size:10.5px; color:var(--text-dim); }
+
+  .empty{ padding:24px 18px; color:var(--text-dim); font-size:12px; line-height:1.7; }
+  .rank{ color:var(--cyan); font-weight:700; margin-right:6px;}
+
+  /* ---------- Map ---------- */
+  #mapwrap{ position:relative; --results-panel-width: 320px; }
+  #map{ width:100%; height:100%; background:#0a0f16; }
+  .leaflet-container{ font-family:'JetBrains Mono', monospace; }
+  .city-label{
+    font-size:10.5px; color:var(--text-dim); white-space:nowrap;
+    text-shadow:0 0 3px var(--bg), 0 0 3px var(--bg);
+    pointer-events:none;
+  }
+  .city-label.home{ color:var(--amber); font-weight:700; }
+
+  #drawbar{
+    position:absolute; top:14px; left:calc((100% - var(--results-panel-width)) / 2); transform:translateX(-50%);
+    z-index:1000; background:rgba(15,23,32,.92); border:1px solid var(--line);
+    border-radius:var(--radius); padding:8px 14px; display:flex; gap:10px; align-items:center;
+    backdrop-filter:blur(4px); max-width:min(600px, 78%);
+  }
+  #drawbar .mode-desc{ font-size:11.5px; color:var(--text); line-height:1.5; }
+
+  .badge-mode{
+    font-size:10px; text-transform:uppercase; letter-spacing:.06em; padding:3px 7px;
+    border-radius:2px; border:1px solid var(--amber); color:var(--amber); flex-shrink:0;
+  }
+
+  #legend{
+    position:absolute; bottom:14px; left:14px; z-index:1000;
+    background:rgba(15,23,32,.92); border:1px solid var(--line); border-radius:var(--radius);
+    padding:8px 12px; font-size:10.5px; color:var(--text-dim); display:flex; gap:14px;
+  }
+  .legend-item{ display:flex; align-items:center; gap:6px;}
+  .swatch{ width:14px; height:2px; }
+
+  /* ---------- Results band (right side of map) ---------- */
+  #resultsPanel{
+    position:absolute; top:14px; right:14px; bottom:14px;
+    width:var(--results-panel-width); max-width:38vw; min-width:240px;
+    background:rgba(15,23,32,.92); border:1px solid var(--line); border-radius:var(--radius);
+    backdrop-filter:blur(4px); z-index:1000;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  .results-panel-header{
+    padding:10px 16px; border-bottom:1px solid var(--line); flex-shrink:0;
+    font-family:'Space Grotesk', sans-serif; font-size:11px; color:var(--cyan);
+    text-transform:uppercase; letter-spacing:.08em;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+  }
+  .sort-select{
+    background:rgba(255,255,255,.04); color:var(--text); border:1px solid var(--line);
+    border-radius:6px; font-size:11px; padding:4px 6px; cursor:pointer;
+    text-transform:none; letter-spacing:normal; font-family:'JetBrains Mono', monospace;
+  }
+  .sort-select:focus{ outline:none; border-color:var(--cyan); }
+  #resultsPanel #results{ flex:1; overflow-y:auto; }
+
+
+  /* ---------- GSI tile basemap ---------- */
+  .leaflet-tile-pane{ transition: filter .2s; }
+  #map.dark-tiles .leaflet-tile-pane{
+    filter: invert(92%) hue-rotate(180deg) brightness(0.92) contrast(0.92) saturate(0.9);
+  }
+  .leaflet-control-attribution{
+    background:rgba(15,23,32,.85) !important; color:var(--text-dim) !important;
+    font-size:10px !important;
+  }
+  .leaflet-control-attribution a{ color:var(--cyan) !important; }
+
+  /* ---------- Advanced settings ---------- */
+  .section-header-row{
+    display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px;
+  }
+  .section-header-row h2{ margin-bottom:0; }
+  .advanced-badge{ display:block; color:var(--amber); font-size:10.5px; margin-top:2px; }
+  .advanced-reset-btn{ font-size:11px; padding:5px 10px; flex-shrink:0; }
+  .advanced-body{ margin-top:2px; }
+  .advanced-body .filter-field:first-of-type{ margin-top:10px; }
+
+  .month-grid{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .month-pill{
+    display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--text-dim);
+    border:1px solid var(--line); border-radius:12px; padding:4px 9px; cursor:pointer; user-select:none;
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .month-pill:hover{ border-color:var(--cyan); color:#eef4f9; }
+  .month-pill input{ display:none; }
+  .month-pill.active{ border-color:var(--cyan); color:#eef4f9; background:rgba(79,216,207,.1); }
+  .month-pill.disabled{ opacity:.3; cursor:not-allowed; pointer-events:none; }
+
+  /* ---------- Search overlay ---------- */
+  #searchOverlay{
+    position:absolute; inset:0; z-index:1500; display:none;
+    align-items:center; justify-content:center;
+    background:rgba(10,15,22,.55); backdrop-filter:blur(2px);
+  }
+  #searchOverlay .box{
+    background:rgba(15,23,32,.95); border:1px solid var(--cyan); border-radius:var(--radius);
+    padding:14px 22px; font-size:13px; color:#eef4f9; display:flex; align-items:center; gap:10px;
+  }
+  #searchOverlay .spinner{
+    width:14px; height:14px; border-radius:50%; border:2px solid var(--line);
+    border-top-color:var(--cyan); animation:spin .8s linear infinite; flex-shrink:0;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="sidebar">
+    <div id="brand">
+      <div class="sweep"></div>
+      <h1>台風トレース検索</h1>
+      <div class="sub">Track Similarity Console</div>
+    </div>
+
+    <div class="section">
+      <div class="section-header-row">
+        <h2>01 / 経路を描く</h2>
+        <button id="btnClear" class="danger advanced-reset-btn" disabled>リセット</button>
+      </div>
+      <div class="row">
+        <button id="btnDraw" class="primary">経路を描く</button>
+        <button id="btnUndo" disabled>1点戻す</button>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="ignoreDir" checked>
+        向き（進行方向）を無視して比較する
+      </label>
+    </div>
+
+    <div class="section">
+      <div class="section-header-row">
+        <h2>02 / エリアで絞り込む</h2>
+        <button id="btnAreaClear" class="danger advanced-reset-btn" disabled>リセット</button>
+      </div>
+      <div class="row">
+        <button id="btnAreaDraw">エリアを描く</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header-row">
+        <h2>03 / 詳細設定</h2>
+        <button id="btnAdvancedReset" class="danger advanced-reset-btn">リセット</button>
+      </div>
+      <div id="advancedBadge" class="advanced-badge"></div>
+      <div id="advancedSettings" class="advanced-body">
+        <div class="filter-field">
+          <label for="pressureMax">中心気圧（この値以下）</label>
+          <select id="pressureMax">
+            <option value="">指定なし</option>
+            <option value="990">990hPa以下</option>
+            <option value="980">980hPa以下</option>
+            <option value="970">970hPa以下</option>
+            <option value="960">960hPa以下</option>
+            <option value="950">950hPa以下</option>
+            <option value="940">940hPa以下</option>
+            <option value="930">930hPa以下</option>
+            <option value="920">920hPa以下</option>
+            <option value="910">910hPa以下</option>
+            <option value="900">900hPa以下</option>
+            <option value="890">890hPa以下</option>
+            <option value="880">880hPa以下</option>
+            <option value="870">870hPa以下</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label for="intensityMin">勢力（最大風速）</label>
+          <select id="intensityMin">
+            <option value="">指定なし</option>
+            <option value="64">強い以上</option>
+            <option value="85">非常に強い以上</option>
+            <option value="105">猛烈</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label>月（通過した月・複数選択可）</label>
+          <div class="month-grid" id="monthGrid"></div>
+        </div>
+      </div>
+
+      <div class="status-line"><span>絞り込み後の台風数</span><b id="areaCount">–</b></div>
+
+      <div class="filter-field" style="margin-top:12px;">
+        <label for="metricSelect">類似度の指標</label>
+        <select id="metricSelect">
+          <option value="frechet" selected>フレシェ距離</option>
+          <option value="avg">平均乖離幅（弧長正規化）</option>
+          <option value="rms">RMS乖離幅（弧長正規化）</option>
+          <option value="dtw">DTW平均距離</option>
+          <option value="hausdorff">ハウスドルフ距離</option>
+          <option value="chamfer">チャムファー距離</option>
+        </select>
+        <div id="metricDesc" style="font-size:11px; color:var(--text-dim); margin-top:6px; line-height:1.5;"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>04 / 検索</h2>
+      <button id="btnSearch" class="primary" disabled style="width:100%;">類似経路を検索</button>
+    </div>
+  </div>
+
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="searchOverlay"><div class="box"><span class="spinner"></span>検索中です…</div></div>
+    <div id="drawbar">
+      <span class="badge-mode" id="modeBadge">待機中</span>
+      <span class="mode-desc" id="modeDesc"></span>
+    </div>
+    <div id="legend">
+      <div class="legend-item"><div class="swatch" style="background:#e8a33d;"></div>自分の経路</div>
+      <div class="legend-item"><div class="swatch" style="background:#4fd8cf;"></div>候補台風</div>
+      <div class="legend-item"><div class="swatch" style="background:#e8608a;"></div>選択中の一致</div>
+    </div>
+    <div id="resultsPanel">
+      <div class="results-panel-header">
+        <span>結果</span>
+        <select id="sortSelect" class="sort-select">
+          <option value="default" selected>デフォルト</option>
+          <option value="pressureAsc">中心気圧が低い順</option>
+          <option value="pressureDesc">中心気圧が高い順</option>
+          <option value="windDesc">勢力が強い順</option>
+          <option value="windAsc">勢力が弱い順</option>
+          <option value="yearDesc">年が新しい順</option>
+          <option value="yearAsc">年が古い順</option>
+        </select>
+      </div>
+      <div id="results">
+        <div class="empty">経路を描いて「類似経路を検索」を押すと、ここに近い過去の台風がランキング表示されます。</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+
+/* =========================================================
+   状態
+   ========================================================= */
+let tracks = [];          // [{id,name,year,points:[{lat,lon,...}]}]
+let userPoints = [];      // [{lat,lon}]
+let drawing = false;
+let userMarkers = [];
+let userLine = null;
+let candidateLayer = L.layerGroup();
+let highlightLayer = null;
+let lastResults = [];
+let baseResults = [];
+let sortMode = 'default';
+let lastMetric = 'frechet';
+let areaBounds = null;    // {latMin,latMax,lonMin,lonMax}
+let areaDrawingMode = false;
+let areaDragStart = null;   // ドラッグ開始地点（矩形の1つ目の角）
+let areaDragActive = false; // マウスボタンを押したままドラッグ中かどうか
+const AREA_ONLY_SEARCH_MAX = 12; // エリア絞り込みのみで検索できる候補数の上限
+let areaRectLayer = null;
+let previewRectLayer = null;
+let previewLineLayer = null;
+
+/* =========================================================
+   地図初期化（国土地理院タイルを使用）
+   ------------------------------------------------------------
+   ベースマップに国土地理院の「淡色地図」タイルを使用。
+   日本国外（フィリピン・台湾・中国沿岸・グアム等）は低ズームの
+   広域データのみで詳細な地物は少ないが、位置関係の把握には
+   十分な範囲をカバーする。利用には外部サーバー
+   （cyberjapandata.gsi.go.jp）への通信が必要。
+   出典: 国土地理院タイル (https://maps.gsi.go.jp/development/ichiran.html)
+   ========================================================= */
+const map = L.map('map', {
+  zoomControl: true, attributionControl: true,
+  minZoom: 3, maxZoom: 10,
+  maxBounds: [[-15, 90], [60, 180]], maxBoundsViscosity: 0.6
+}).setView([22, 132], 4);
+
+const GSI_ATTRIBUTION =
+  '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>';
+
+const gsiTileLayer = L.tileLayer(
+  'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+  { attribution: GSI_ATTRIBUTION, minZoom: 2, maxZoom: 18 }
+).addTo(map);
+
+const ISLET_POINTS = { "グアム": [13.44,144.79], "サイパン": [15.19,145.75] };
+
+const CITY_LABELS = [
+  { name: "東京", lat: 35.68, lon: 139.77 },
+  { name: "大阪", lat: 34.69, lon: 135.50 },
+  { name: "那覇", lat: 26.21, lon: 127.68 },
+  { name: "ソウル", lat: 37.57, lon: 126.98 },
+  { name: "上海", lat: 31.23, lon: 121.47 },
+  { name: "台北", lat: 25.03, lon: 121.56 },
+  { name: "マニラ", lat: 14.60, lon: 120.98 },
+  { name: "グアム", lat: 13.44, lon: 144.79 },
+];
+
+const GRAT_COLOR = '#3a4a58';
+const LABEL_COLOR = '#c9d6e2';
+let gratLayer = L.layerGroup().addTo(map);
+let labelLayer = L.layerGroup().addTo(map);
+
+function drawGraticule() {
+  gratLayer.clearLayers();
+  for (let lat = -10; lat <= 60; lat += 10) {
+    gratLayer.addLayer(L.polyline([[lat, 90], [lat, 180]], { color: GRAT_COLOR, weight: 1, opacity: .4, interactive: false }));
+  }
+  for (let lon = 90; lon <= 180; lon += 10) {
+    gratLayer.addLayer(L.polyline([[-15, lon], [60, lon]], { color: GRAT_COLOR, weight: 1, opacity: .4, interactive: false }));
+  }
+}
+
+function drawLabels() {
+  labelLayer.clearLayers();
+  CITY_LABELS.forEach(city => {
+    labelLayer.addLayer(L.circleMarker([city.lat, city.lon], {
+      radius: 2.5, color: LABEL_COLOR,
+      weight: 1, fillColor: LABEL_COLOR, fillOpacity: 1, interactive: false
+    }));
+    labelLayer.addLayer(L.marker([city.lat, city.lon], {
+      icon: L.divIcon({
+        className: 'city-label',
+        html: city.name, iconSize: [0, 0], iconAnchor: [-6, 4]
+      }),
+      interactive: false
+    }));
+  });
+}
+
+document.getElementById('map').classList.add('dark-tiles');
+drawGraticule();
+drawLabels();
+
+candidateLayer.addTo(map);
+
+map.on('mousedown', (e) => {
+  if (!areaDrawingMode) return;
+  areaDragActive = true;
+  areaDragStart = { lat: e.latlng.lat, lon: e.latlng.lng };
+  if (previewRectLayer) { map.removeLayer(previewRectLayer); previewRectLayer = null; }
+  updateButtons();
+});
+
+map.on('mousemove', (e) => {
+  if (areaDrawingMode && areaDragActive && areaDragStart) {
+    const p = { lat: e.latlng.lat, lon: e.latlng.lng };
+    const latMin = Math.min(areaDragStart.lat, p.lat), latMax = Math.max(areaDragStart.lat, p.lat);
+    const lonMin = Math.min(areaDragStart.lon, p.lon), lonMax = Math.max(areaDragStart.lon, p.lon);
+    if (previewRectLayer) map.removeLayer(previewRectLayer);
+    previewRectLayer = L.rectangle([[latMin, lonMin], [latMax, lonMax]], {
+      color: '#4fd8cf', weight: 1.2, fillColor: '#4fd8cf', fillOpacity: .06, dashArray: '4 3', interactive: false
+    }).addTo(map);
+    return;
+  }
+  if (drawing && userPoints.length >= 1) {
+    const last = userPoints[userPoints.length - 1];
+    if (previewLineLayer) { map.removeLayer(previewLineLayer); previewLineLayer = null; }
+    previewLineLayer = L.polyline([[last.lat, last.lon], [e.latlng.lat, e.latlng.lng]], {
+      color: '#e8a33d', weight: 2, opacity: .5, dashArray: '4 3', interactive: false
+    }).addTo(map);
+  }
+});
+
+map.on('mouseup', (e) => {
+  if (!areaDrawingMode || !areaDragActive) return;
+  areaDragActive = false;
+  const start = areaDragStart;
+  areaDragStart = null;
+  if (!start) { updateButtons(); return; }
+
+  const p = { lat: e.latlng.lat, lon: e.latlng.lng };
+  // ドラッグ距離が小さすぎる場合（誤クリックなど）は確定せず、そのままやり直せるようにする
+  const p1 = map.latLngToContainerPoint([start.lat, start.lon]);
+  const p2 = map.latLngToContainerPoint([p.lat, p.lon]);
+  if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 6) {
+    if (previewRectLayer) { map.removeLayer(previewRectLayer); previewRectLayer = null; }
+    updateButtons();
+    return;
+  }
+
+  if (previewRectLayer) { map.removeLayer(previewRectLayer); previewRectLayer = null; }
+  const latMin = Math.min(start.lat, p.lat), latMax = Math.max(start.lat, p.lat);
+  const lonMin = Math.min(start.lon, p.lon), lonMax = Math.max(start.lon, p.lon);
+  areaBounds = { latMin, latMax, lonMin, lonMax };
+  if (areaRectLayer) map.removeLayer(areaRectLayer);
+  areaRectLayer = L.rectangle([[latMin, lonMin], [latMax, lonMax]], {
+    color: '#4fd8cf', weight: 1.5, fillColor: '#4fd8cf', fillOpacity: .08, dashArray: '4 3', interactive: false
+  }).addTo(map);
+  setAreaDrawingMode(false);
+  btnAreaClear.disabled = false;
+  updateAreaCount();
+});
+
+map.on('click', (e) => {
+  if (areaDrawingMode) return; // エリアはドラッグ操作で描画するため、クリックだけでは確定しない
+  if (!drawing) return;
+  addUserPoint(e.latlng.lat, e.latlng.lng);
+});
+
+map.on('dblclick', (e) => {
+  if (!drawing) return;
+  // ダブルクリックは「クリック」が2回発火した後に呼ばれるため、
+  // 2回目のクリックで追加された重複点（ほぼ同じ座標）を取り除く
+  if (userPoints.length >= 2) {
+    const last = userPoints[userPoints.length - 1];
+    const prev = userPoints[userPoints.length - 2];
+    if (Math.abs(last.lat - prev.lat) < 1e-9 && Math.abs(last.lon - prev.lon) < 1e-9) {
+      userPoints.pop();
+      const m = userMarkers.pop();
+      if (m) map.removeLayer(m);
+      redrawUserLine();
+    }
+  }
+  setDrawingMode(false);
+  // 経路を描き終えたら、続けてエリアをドラッグ指定できるよう自動的に有効化する。
+  // ただし、既にエリアが指定済み（2回目以降の検索で経路だけ描き直した場合など）は
+  // ボタンが誤って「エリア指定を中止」表示のままになってしまうため、自動遷移させない。
+  setAreaDrawingMode(!areaBounds);
+  updateButtons();
+});
+
+/* =========================================================
+   台風データ読み込み・パース
+   ------------------------------------------------------------
+   気象庁 RSMC Tokyo-Typhoon Center が公開している「ベストトラック
+   （テキスト形式）」の生データファイル bst_all.txt を、このHTML
+   ファイルと同じフォルダに置いておくと、fetch() で読み込んでパース
+   する。データ本体をHTMLに埋め込まないことで、ファイルサイズを
+   大幅に削減している。
+
+   出典・入手先:
+   気象庁 RSMC Tokyo-Typhoon Center Best Track Data
+   https://www.jma.go.jp/jma/jma-eng/jma-center/rsmc-hp-pub-eg/besttrack.html
+   フォーマット仕様:
+   https://www.jma.go.jp/jma/jma-eng/jma-center/rsmc-hp-pub-eg/Besttracks/e_format_bst.html
+
+   フォーマット概要（固定長カラム、1レコード＝1行、CRLF区切り）:
+   ・ヘッダ行: 先頭5文字が '66666'。台風ごとに1行。
+       - 7〜10文字目: 国際番号ID（下2桁の西暦＋2桁の連番）
+       - 13〜15文字目: 続くデータ行数
+       - 31〜50文字目: 台風の名前（無い場合は空白）
+   ・データ行: ヘッダ直後にデータ行数ぶん続く。
+       - 1〜8文字目:  解析時刻 yymmddhh（UTC）
+       - 14文字目:    階級 (2:TD 3:TS 4:STS 5:TY 6:L 7:ENTER 9:TS相当以上)
+       - 16〜18文字目: 中心緯度（0.1度単位）
+       - 20〜23文字目: 中心経度（0.1度単位）
+       - 25〜28文字目: 中心気圧（hPa）
+       - 34〜36文字目: 最大風速（kt）
+       - 72文字目:     '#' の場合、解析時刻の前後1時間以内に日本上陸・通過
+   ========================================================= */
+const GRADE_LABELS = { 2: 'TD', 3: 'TS', 4: 'STS', 5: 'TY', 6: 'L', 7: 'ENTER', 9: 'TS+' };
+
+// 2桁の西暦を4桁に変換する（このデータセットは1951〜2026年の範囲のため、
+// 50以下は2000年代、51以上は1900年代とみなす）
+function jmaYearTo4Digit(yy) {
+  return yy <= 50 ? 2000 + yy : 1900 + yy;
+}
+
+function parseBestTrackText(text) {
+  const lines = text.split(/\r\n|\n|\r/);
+  const out = [];
+  let cur = null;
+
+  const pushCurrent = () => {
+    if (cur && cur.points.length >= 2) out.push(cur);
+  };
+
+  for (const raw of lines) {
+    if (raw.length < 5) continue;
+
+    if (raw.startsWith('66666')) {
+      pushCurrent();
+      const idStr = raw.slice(6, 10).trim();
+      if (!idStr) { cur = null; continue; }
+      const name = raw.slice(30, 50).trim();
+      const yy = parseInt(idStr.slice(0, 2), 10);
+      cur = { id: idStr, name, year: jmaYearTo4Digit(yy), points: [] };
+      continue;
+    }
+
+    if (!cur || raw.length < 36) continue;
+
+    const timeStr = raw.slice(0, 8).trim();
+    const latRaw = raw.slice(15, 18).trim();
+    const lonRaw = raw.slice(19, 23).trim();
+    if (timeStr.length !== 8 || !latRaw || !lonRaw) continue;
+
+    const gradeCode = parseInt(raw.slice(13, 14).trim(), 10);
+    const presRaw = raw.slice(24, 28).trim();
+    const windRaw = raw.slice(33, 36).trim();
+    const landfallCh = raw.length > 71 ? raw[71] : '';
+
+    const yy2 = parseInt(timeStr.slice(0, 2), 10);
+    const mm = timeStr.slice(2, 4);
+    const dd = timeStr.slice(4, 6);
+    const hh = timeStr.slice(6, 8);
+    const dt = `${jmaYearTo4Digit(yy2)}-${mm}-${dd} ${hh}:00`;
+
+    const lat = parseInt(latRaw, 10) / 10;
+    const lon = parseInt(lonRaw, 10) / 10;
+    if (isNaN(lat) || isNaN(lon)) continue;
+
+    // 風速は "000"（未観測時のプレースホルダ）を空欄（欠測）として扱う
+    const windVal = windRaw ? parseInt(windRaw, 10) : 0;
+
+    cur.points.push({
+      lat, lon, dt,
+      pressure: presRaw ? String(parseInt(presRaw, 10)) : '',
+      wind: windVal > 0 ? String(windVal) : '',
+      grade: GRADE_LABELS[gradeCode] || '',
+      landfall: landfallCh === '#' ? '1' : '',
+    });
+  }
+  pushCurrent();
+  return out;
+}
+
+async function loadTyphoonData() {
+  try {
+    const res = await fetch('bst_all.txt');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    tracks = parseBestTrackText(text);
+  } catch (err) {
+    console.error('台風データ（bst_all.txt）の読み込みに失敗しました:', err);
+    document.getElementById('results').innerHTML =
+      '<div class="empty">台風データ（bst_all.txt）の読み込みに失敗しました。このHTMLファイルと同じフォルダに bst_all.txt を置いた上で、Webサーバー経由（file:// ではなく http:// / https://）で開いているかご確認ください。</div>';
+  }
+  updateButtons();
+  updateAreaCount();
+}
+
+/* =========================================================
+   ユーザー経路の描画
+   ========================================================= */
+const btnDraw = document.getElementById('btnDraw');
+const btnUndo = document.getElementById('btnUndo');
+const btnClear = document.getElementById('btnClear');
+const btnSearch = document.getElementById('btnSearch');
+const modeBadge = document.getElementById('modeBadge');
+const modeDesc = document.getElementById('modeDesc');
+const btnAreaDraw = document.getElementById('btnAreaDraw');
+const btnAreaClear = document.getElementById('btnAreaClear');
+const areaCountEl = document.getElementById('areaCount');
+
+function setDrawingMode(on) {
+  drawing = on;
+  if (!drawing && previewLineLayer) { map.removeLayer(previewLineLayer); previewLineLayer = null; }
+  btnDraw.textContent = drawing ? '描画を終了' : '経路を描く';
+  btnDraw.classList.toggle('primary', drawing);
+  map.getContainer().style.cursor = drawing ? 'crosshair' : '';
+  if (drawing) map.doubleClickZoom.disable(); else map.doubleClickZoom.enable();
+}
+
+// エリア（矩形）指定モードのON/OFFをまとめて管理する。
+// ONの間は地図のパン（ドラッグ移動）を無効化し、そのドラッグ操作を矩形描画に使う。
+function setAreaDrawingMode(on) {
+  areaDrawingMode = on;
+  areaDragStart = null;
+  areaDragActive = false;
+  if (previewRectLayer) { map.removeLayer(previewRectLayer); previewRectLayer = null; }
+  btnAreaDraw.classList.toggle('primary', on);
+  btnAreaDraw.textContent = on ? 'エリア指定を中止' : 'エリアを描く';
+  map.getContainer().style.cursor = on ? 'crosshair' : '';
+  if (on) map.dragging.disable(); else map.dragging.enable();
+}
+
+btnDraw.addEventListener('click', () => {
+  setAreaDrawingMode(false);
+  const turningOn = !drawing;
+  if (turningOn && routeNeedsResetAfterSearch && userPoints.length > 0) {
+    // 検索実行後に再度「経路を描く」を押した場合は、古い経路を自動でクリアしてから描き始める
+    userPoints = [];
+    userMarkers.forEach(m => map.removeLayer(m));
+    userMarkers = [];
+    if (previewLineLayer) { map.removeLayer(previewLineLayer); previewLineLayer = null; }
+    redrawUserLine();
+    clearResults();
+  }
+  routeNeedsResetAfterSearch = false;
+  setDrawingMode(!drawing);
+  updateButtons();
+});
+
+btnAreaDraw.addEventListener('click', () => {
+  setDrawingMode(false);
+  const turningOn = !areaDrawingMode;
+  if (turningOn && areaNeedsResetAfterSearch && areaBounds) {
+    // 検索実行後に再度「エリアを描く」を押した場合は、古いエリアを自動でクリアしてから描き始める
+    areaBounds = null;
+    if (areaRectLayer) { map.removeLayer(areaRectLayer); areaRectLayer = null; }
+    btnAreaClear.disabled = true;
+    updateAreaCount();
+  }
+  areaNeedsResetAfterSearch = false;
+  setAreaDrawingMode(!areaDrawingMode);
+  updateButtons();
+});
+
+btnAreaClear.addEventListener('click', () => {
+  areaBounds = null;
+  if (areaRectLayer) { map.removeLayer(areaRectLayer); areaRectLayer = null; }
+  btnAreaClear.disabled = true;
+  areaNeedsResetAfterSearch = false;
+  updateAreaCount();
+});
+
+document.getElementById('pressureMax').addEventListener('change', updateAreaCount);
+document.getElementById('intensityMin').addEventListener('change', updateAreaCount);
+
+/* ---- 詳細設定 ---- */
+
+document.getElementById('btnAdvancedReset').addEventListener('click', () => {
+  document.getElementById('pressureMax').value = '';
+  document.getElementById('intensityMin').value = '';
+  document.querySelectorAll('#monthGrid input[type=checkbox]').forEach(cb => {
+    cb.checked = false;
+    cb.closest('.month-pill').classList.remove('active');
+  });
+  updateAreaCount();
+});
+
+/* ---- 月（複数選択可）のピル群を生成 ---- */
+function buildMonthGrid() {
+  const el = document.getElementById('monthGrid');
+  el.innerHTML = '';
+  for (let m = 1; m <= 12; m++) {
+    const id = `month-${m}`;
+    const label = document.createElement('label');
+    label.className = 'month-pill';
+    label.setAttribute('for', id);
+    label.innerHTML = `<input type="checkbox" id="${id}" value="${m}">${m}月`;
+    el.appendChild(label);
+  }
+  el.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('.month-pill').classList.toggle('active', cb.checked);
+      updateAreaCount();
+    });
+  });
+}
+buildMonthGrid();
+
+
+
+btnUndo.addEventListener('click', () => {
+  if (userPoints.length === 0) return;
+  userPoints.pop();
+  const m = userMarkers.pop();
+  if (m) map.removeLayer(m);
+  if (previewLineLayer) { map.removeLayer(previewLineLayer); previewLineLayer = null; }
+  redrawUserLine();
+  updateButtons();
+});
+
+btnClear.addEventListener('click', () => {
+  userPoints = [];
+  userMarkers.forEach(m => map.removeLayer(m));
+  userMarkers = [];
+  if (previewLineLayer) { map.removeLayer(previewLineLayer); previewLineLayer = null; }
+  redrawUserLine();
+  clearResults();
+  routeNeedsResetAfterSearch = false;
+  updateButtons();
+});
+
+btnSearch.addEventListener('click', runSearch);
+document.getElementById('metricSelect').addEventListener('change', updateMetricDesc);
+
+function addUserPoint(lat, lon) {
+  userPoints.push({ lat, lon });
+  const marker = L.circleMarker([lat, lon], {
+    radius: 4, color: '#e8a33d', weight: 2, fillColor: '#e8a33d', fillOpacity: 1, interactive: false
+  }).addTo(map);
+  userMarkers.push(marker);
+  redrawUserLine();
+  updateButtons();
+}
+
+function redrawUserLine() {
+  if (userLine) { map.removeLayer(userLine); userLine = null; }
+  if (userPoints.length >= 2) {
+    userLine = L.polyline(userPoints.map(p => [p.lat, p.lon]), {
+      color: '#e8a33d', weight: 3, opacity: .9, interactive: false
+    }).addTo(map);
+  }
+}
+
+function updateButtons() {
+  btnUndo.disabled = userPoints.length === 0;
+  btnClear.disabled = userPoints.length === 0;
+
+  const hasUserRoute = userPoints.length >= 2;
+  const areaActive = !!areaBounds;
+  const areaCandidateCount = areaActive ? getEffectiveTracks().length : 0;
+  const areaOnlyOk = areaActive && areaCandidateCount > 0 && areaCandidateCount <= AREA_ONLY_SEARCH_MAX;
+
+  // エリア指定（02）が必須。エリア未指定なら経路の有無に関わらず検索不可。
+  const canSearch = areaActive && (hasUserRoute ? areaCandidateCount > 0 : areaOnlyOk);
+  btnSearch.disabled = tracks.length === 0 || !canSearch;
+
+  // ---- 地図上部のステータス表示（ラベル＋説明文）をここで一括更新 ----
+  let label, color, desc;
+  if (areaDrawingMode) {
+    label = 'エリア指定中';
+    color = 'var(--cyan)';
+    desc = areaDragActive
+      ? 'そのままドラッグしてサイズを調整し、マウスを離すと矩形が確定します。'
+      : '地図上をドラッグしてエリア（矩形）を指定してください。';
+  } else if (drawing) {
+    label = '描画中';
+    color = 'var(--amber)';
+    desc = '地図をクリックして自分の経路の点を追加してください（2点以上）。ダブルクリックで描画を終了します。';
+  } else {
+    label = '待機中';
+    color = 'var(--line)';
+    if (!hasUserRoute && !areaActive) {
+      desc = '① 「経路を描く」をクリックし、地図上で自分の経路を指定してください（2点以上）。';
+    } else if (hasUserRoute && !areaActive) {
+      desc = '② 続けて「エリアを描く」でエリアを指定してください（比較精度を保つため必須です）。';
+    } else if (!hasUserRoute && areaActive) {
+      if (areaCandidateCount === 0) {
+        desc = 'このエリアを通過した台風が見つかりません。エリアを変更するか、経路を描いてください。';
+      } else if (areaCandidateCount > AREA_ONLY_SEARCH_MAX) {
+        desc = `エリア内の候補が${areaCandidateCount}件と多いため、このままでは検索できません。「経路を描く」で自分の経路も指定するか、エリアを狭めるか、詳細設定（中心気圧・勢力・月）で候補を絞り込んでください。`;
+      } else {
+        desc = `③ 経路未指定でも、エリア内の候補（${areaCandidateCount}件）でそのまま検索できます。`;
+        if (areaCandidateCount > 3) desc += ' 候補が多い場合は、詳細設定（中心気圧・勢力・月）でさらに絞り込めます。';
+      }
+    } else if (areaCandidateCount === 0) {
+      desc = 'このエリアを通過した台風が見つかりません。エリアを変更してください。';
+    } else {
+      desc = '③ 準備完了です。「類似経路を検索」を押してください。';
+      if (areaCandidateCount > 3) desc += ' 必要に応じて、詳細設定（中心気圧・勢力・月）で候補をさらに絞り込めます。';
+    }
+  }
+  modeBadge.textContent = label;
+  modeBadge.style.borderColor = color;
+  modeDesc.textContent = desc;
+}
+
+/* =========================================================
+   幾何計算：測地距離・DTW（動的時間伸縮法）によるスコア
+   ========================================================= */
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+// DTW（動的時間伸縮法）: 点数や間隔が揃っていない2つの経路を、最も対応が
+// 良くなるように伸縮させながら整合させ、整合後の平均測地距離(km)をスコアとして返す。
+// 弧長ベースのavgDeviationScoreと違い、点の「密度」（観測間隔）の違いに応じて
+// 対応関係が伸び縮みするため、一部区間だけ観測点が密/疎な経路の比較に強い。
+// 弱点：区間全体の「平均」を取るため、一部だけ大きくズレていても他の部分の
+// 近さで打ち消されてしまい、見た目ほど近くない候補が上位に来ることがある。
+function dtwScore(a, b) {
+  const n = a.length, m = b.length;
+  const D = new Array(n + 1);
+  for (let i = 0; i <= n; i++) D[i] = new Float64Array(m + 1).fill(Infinity);
+  D[0][0] = 0;
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      const cost = haversineKm(a[i - 1].lat, a[i - 1].lon, b[j - 1].lat, b[j - 1].lon);
+      D[i][j] = cost + Math.min(D[i - 1][j], D[i][j - 1], D[i - 1][j - 1]);
+    }
+  }
+  // 整合経路の長さで割って「1ステップあたりの平均距離」に正規化
+  let i = n, j = m, steps = 0;
+  while (i > 0 || j > 0) {
+    steps++;
+    if (i === 0) { j--; }
+    else if (j === 0) { i--; }
+    else {
+      const diag = D[i - 1][j - 1], up = D[i - 1][j], left = D[i][j - 1];
+      if (diag <= up && diag <= left) { i--; j--; }
+      else if (up < left) { i--; }
+      else { j--; }
+    }
+  }
+  return D[n][m] / steps;
+}
+
+// 離散フレシェ距離（Discrete Fréchet Distance）：
+// 「人と犬が、それぞれの経路上を（後戻りせず）同時に歩くとき、
+//   2人を結ぶリードの長さが常に最短で済むように歩いた場合の、
+//   最大リード長」に相当するスコア（km）。
+// DTWの「平均」と違い「経路中で最も離れた瞬間」を評価するため、
+// 一部だけ大きく逸れる経路（似ているようで似ていない経路）を
+// 正しく低評価にできる。経路の形状比較でDTWより一般的に好まれる指標。
+function frechetScore(a, b) {
+  const n = a.length, m = b.length;
+  const ca = new Array(n);
+  for (let i = 0; i < n; i++) ca[i] = new Float64Array(m).fill(-1);
+  function dist(i, j) {
+    return haversineKm(a[i].lat, a[i].lon, b[j].lat, b[j].lon);
+  }
+  function c(i, j) {
+    if (ca[i][j] > -1) return ca[i][j];
+    let val;
+    if (i === 0 && j === 0) val = dist(0, 0);
+    else if (i > 0 && j === 0) val = Math.max(c(i - 1, 0), dist(i, 0));
+    else if (i === 0 && j > 0) val = Math.max(c(0, j - 1), dist(0, j));
+    else if (i > 0 && j > 0) val = Math.max(Math.min(c(i - 1, j), c(i - 1, j - 1), c(i, j - 1)), dist(i, j));
+    else val = Infinity;
+    ca[i][j] = val;
+    return val;
+  }
+  return c(n - 1, m - 1);
+}
+
+// 弧長で累積距離を求め、割合（0〜1）ごとに等間隔サンプリングした点列を返す。
+// 点数や間隔が揃っていない2経路を、同じ「進行度合い」で比較できるように揃える。
+function resampleByArcLength(points, n) {
+  const len = points.length;
+  const cum = new Float64Array(len);
+  for (let i = 1; i < len; i++) {
+    cum[i] = cum[i - 1] + haversineKm(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
+  }
+  const total = cum[len - 1];
+  const out = new Array(n);
+  if (total === 0) {
+    for (let k = 0; k < n; k++) out[k] = { lat: points[0].lat, lon: points[0].lon };
+    return out;
+  }
+  let seg = 0;
+  for (let k = 0; k < n; k++) {
+    const target = (k / (n - 1)) * total;
+    while (seg < len - 2 && cum[seg + 1] < target) seg++;
+    const segLen = cum[seg + 1] - cum[seg];
+    const t = segLen > 0 ? (target - cum[seg]) / segLen : 0;
+    out[k] = {
+      lat: points[seg].lat + (points[seg + 1].lat - points[seg].lat) * t,
+      lon: points[seg].lon + (points[seg + 1].lon - points[seg].lon) * t,
+    };
+  }
+  return out;
+}
+
+// 平均乖離幅（弧長正規化した距離の積分）：
+// 両曲線を弧長の割合（0〜1）で揃えて同じ数の点に再サンプリングし、
+// 対応する割合ごとの測地距離を台形則で積分・正規化した値（km）。
+// = ∫|f−g|ds を弧長で正規化したもの＝経路に沿った平均的なズレの幅。
+// DTWの「平均」をサンプリング密度の偏りなく求めたもの、かつ
+// フレシェ距離の「最悪瞬間」ではなく「平均的なズレ」を測る指標。
+// 一時的な大きなズレより、経路全体としての近さを重視したい場合に向く。
+function avgDeviationScore(a, b, n = 101) {
+  const ra = resampleByArcLength(a, n);
+  const rb = resampleByArcLength(b, n);
+  const d = new Float64Array(n);
+  for (let k = 0; k < n; k++) {
+    d[k] = haversineKm(ra[k].lat, ra[k].lon, rb[k].lat, rb[k].lon);
+  }
+  // 台形則で t∈[0,1] を積分（等間隔なので重み付き平均と同義）
+  let sum = 0.5 * (d[0] + d[n - 1]);
+  for (let k = 1; k < n - 1; k++) sum += d[k];
+  return sum / (n - 1);
+}
+
+// RMS乖離幅（弧長正規化・二乗平均平方根）：
+// avgDeviationScoreと同じ再サンプリングを使うが、距離を2乗してから
+// 平均し平方根を取るため、一時的に大きくズレる区間があると
+// 平均よりもスコアが悪化しやすい（外れ値に敏感）。
+// フレシェ距離（最悪瞬間のみ）と平均乖離幅（全体の平均）の中間的な性質を持つ。
+function rmsDeviationScore(a, b, n = 101) {
+  const ra = resampleByArcLength(a, n);
+  const rb = resampleByArcLength(b, n);
+  const d2 = new Float64Array(n);
+  for (let k = 0; k < n; k++) {
+    const dist = haversineKm(ra[k].lat, ra[k].lon, rb[k].lat, rb[k].lon);
+    d2[k] = dist * dist;
+  }
+  let sum = 0.5 * (d2[0] + d2[n - 1]);
+  for (let k = 1; k < n - 1; k++) sum += d2[k];
+  return Math.sqrt(sum / (n - 1));
+}
+
+// ハウスドルフ距離（Discrete Hausdorff Distance）：
+// 「片方の経路上の各点について、もう片方の経路上で最も近い点までの距離」を求め、
+// その中の最大値を両方向（a→b、b→a）で計算し、大きい方を採用したもの。
+// フレシェ距離と違い時系列的な対応（後戻りしない同時進行）を仮定しないため、
+// 同じような場所を通っていれば、多少速度が違ったり、蛇行や小さな後戻りが
+// あっても形状の近さとして評価できる。逆に「通過した順序」は考慮しないため、
+// 似た場所を逆順や別ルートでなぞっているだけの経路も近いと判定されうる点に注意。
+function hausdorffScore(a, b) {
+  function directed(p, q) {
+    let worst = 0;
+    for (const pp of p) {
+      let best = Infinity;
+      for (const qq of q) {
+        const d = haversineKm(pp.lat, pp.lon, qq.lat, qq.lon);
+        if (d < best) best = d;
+      }
+      if (best > worst) worst = best;
+    }
+    return worst;
+  }
+  return Math.max(directed(a, b), directed(b, a));
+}
+
+// チャムファー距離（Chamfer Distance）：
+// ハウスドルフ距離と同じく「各点から相手の経路上で最も近い点までの距離」を使うが、
+// 最大値ではなく両方向の平均を取る。ハウスドルフ距離（最悪の1点）と
+// 平均乖離幅（時系列順の対応）の中間にあたる指標で、時系列の対応は仮定しない
+// （ハウスドルフ距離と同様、順序を問わない）一方、外れ値1点でスコアが
+// 決まってしまうハウスドルフ距離より安定した「全体としての形の近さ」を測れる。
+// サンプリング密度の偏りを避けるため、弧長正規化した再サンプリング点で計算する。
+// 弱点：順序を考慮しないため、蛇行・後戻り・逆走でも位置が近ければ低評価（＝近い）
+// になりうる点と、経路の一部だけが近いケースでも小さめに出やすい点はハウスドルフ
+// 距離と共通の注意点。
+function chamferScore(a, b, n = 101) {
+  const ra = resampleByArcLength(a, n);
+  const rb = resampleByArcLength(b, n);
+  function directedMean(p, q) {
+    let sum = 0;
+    for (const pp of p) {
+      let best = Infinity;
+      for (const qq of q) {
+        const d = haversineKm(pp.lat, pp.lon, qq.lat, qq.lon);
+        if (d < best) best = d;
+      }
+      sum += best;
+    }
+    return sum / p.length;
+  }
+  return (directedMean(ra, rb) + directedMean(rb, ra)) / 2;
+}
+
+/* =========================================================
+   検索実行（エリア絞り込み・区間クリップ対応）
+   ========================================================= */
+function inBBox(p, b) {
+  return p.lat >= b.latMin && p.lat <= b.latMax && p.lon >= b.lonMin && p.lon <= b.lonMax;
+}
+
+// 2点を結ぶ線分が矩形エリアと交差するか（Liang-Barsky法）。
+// 両端点がエリア外でも、線がエリアを通過していれば true になる。
+function segIntersectsBBox(p1, p2, b) {
+  const x0 = p1.lon, y0 = p1.lat, dx = p2.lon - p1.lon, dy = p2.lat - p1.lat;
+  let tmin = 0, tmax = 1;
+  const clipEdge = (pVal, qVal) => {
+    if (pVal === 0) return qVal >= 0;
+    const r = qVal / pVal;
+    if (pVal < 0) {
+      if (r > tmax) return false;
+      if (r > tmin) tmin = r;
+    } else {
+      if (r < tmin) return false;
+      if (r < tmax) tmax = r;
+    }
+    return true;
+  };
+  if (!clipEdge(-dx, x0 - b.lonMin)) return false;
+  if (!clipEdge(dx, b.lonMax - x0)) return false;
+  if (!clipEdge(-dy, y0 - b.latMin)) return false;
+  if (!clipEdge(dy, b.latMax - y0)) return false;
+  return tmin <= tmax;
+}
+
+// 経路のうち、エリアと関わりのある最初の点〜最後の点までを切り出す。
+// 点自体がエリア内にある場合だけでなく、隣接区間の線がエリアを
+// 通過している場合もその点を範囲に含める。
+function clipToArea(points, b) {
+  let firstIdx = -1, lastIdx = -1;
+  for (let i = 0; i < points.length; i++) {
+    let hit = inBBox(points[i], b);
+    if (!hit && i > 0) hit = segIntersectsBBox(points[i - 1], points[i], b);
+    if (!hit && i < points.length - 1) hit = segIntersectsBBox(points[i], points[i + 1], b);
+    if (hit) { if (firstIdx === -1) firstIdx = i; lastIdx = i; }
+  }
+  if (firstIdx === -1) return null;
+  return points.slice(firstIdx, lastIdx + 1);
+}
+
+// 台風の強さ（気象庁の階級）：最大風速(kt)に対応
+//   強い       : 64kt以上 (33m/s以上)
+//   非常に強い : 85kt以上 (44m/s以上)
+//   猛烈な     : 105kt以上 (54m/s以上)
+function trackMinPressure(points) {
+  const vals = points.map(p => parseFloat(p.pressure)).filter(v => !isNaN(v));
+  return vals.length ? Math.min(...vals) : null;
+}
+function trackMaxWindKt(points) {
+  const vals = points.map(p => parseFloat(p.wind)).filter(v => !isNaN(v));
+  return vals.length ? Math.max(...vals) : null;
+}
+function trackHasMonth(points, months) {
+  if (!months || months.length === 0) return true;
+  return points.some(p => p.dt && p.dt.length >= 7 && months.includes(parseInt(p.dt.substring(5, 7), 10)));
+}
+function getPressureFilterValue() {
+  const el = document.getElementById('pressureMax');
+  if (!el || el.value === '') return null;
+  const v = parseFloat(el.value);
+  return isNaN(v) ? null : v;
+}
+function getIntensityFilterMinKt() {
+  const el = document.getElementById('intensityMin');
+  if (!el || el.value === '') return null;
+  const v = parseFloat(el.value);
+  return isNaN(v) ? null : v;
+}
+function getMonthFilterValues() {
+  const boxes = document.querySelectorAll('#monthGrid input[type=checkbox]:checked');
+  const vals = Array.from(boxes).map(b => parseInt(b.value, 10));
+  return vals.length ? vals : null;
+}
+function passesStrengthFilters(points) {
+  const pressureMax = getPressureFilterValue();
+  if (pressureMax !== null) {
+    const mp = trackMinPressure(points);
+    if (mp === null || mp > pressureMax) return false;
+  }
+  const minWindKt = getIntensityFilterMinKt();
+  if (minWindKt !== null) {
+    const mw = trackMaxWindKt(points);
+    if (mw === null || mw < minWindKt) return false;
+  }
+  const months = getMonthFilterValues();
+  if (months !== null && !trackHasMonth(points, months)) return false;
+  return true;
+}
+
+// エリアが指定されていれば「エリアを通過した台風」だけに絞り込み、各台風はエリア内区間に切り詰める。
+// 中心気圧・勢力（最大風速）の条件は、台風の生涯全体（全観測点）のピーク値で判定する。
+function getEffectiveTracks() {
+  if (!areaBounds) {
+    return tracks
+      .filter(t => passesStrengthFilters(t.points))
+      .map(t => ({ track: t, points: t.points }));
+  }
+  const out = [];
+  tracks.forEach(t => {
+    if (!passesStrengthFilters(t.points)) return;
+    const clipped = clipToArea(t.points, areaBounds);
+    if (clipped && clipped.length >= 2) out.push({ track: t, points: clipped });
+  });
+  return out;
+}
+
+// 指定した条件（エリア＋任意の気圧/勢力/月）に合致する台風数を数える（プルダウン・月ピルの有効判定用）
+function countCandidatesFor({ pressureMax = null, minWindKt = null, months = null }) {
+  if (!areaBounds) return 0;
+  let n = 0;
+  for (const t of tracks) {
+    if (pressureMax !== null) {
+      const mp = trackMinPressure(t.points);
+      if (mp === null || mp > pressureMax) continue;
+    }
+    if (minWindKt !== null) {
+      const mw = trackMaxWindKt(t.points);
+      if (mw === null || mw < minWindKt) continue;
+    }
+    if (months !== null && !trackHasMonth(t.points, months)) continue;
+    const clipped = clipToArea(t.points, areaBounds);
+    if (clipped && clipped.length >= 2) n++;
+  }
+  return n;
+}
+
+// 各セレクトが取り得る選択肢の完全な定義（表示用のマスターリスト）
+const PRESSURE_OPTION_DEFS = [990, 980, 970, 960, 950, 940, 930, 920, 910, 900, 890, 880, 870]
+  .map(v => ({ value: String(v), label: `${v}hPa以下` }));
+const INTENSITY_OPTION_DEFS = [
+  { value: '64', label: '強い以上' },
+  { value: '85', label: '非常に強い以上' },
+  { value: '105', label: '猛烈' },
+];
+
+// セレクトの中身を丸ごと再構築する。isValidを満たさない選択肢はDOMから完全に取り除く
+// （disabled/hiddenではなくoption要素自体を削除するため、リストに残らない）。
+// 現在選択中の値がまだ有効ならそのまま維持し、無効になっていれば「指定なし」に戻す。
+function rebuildSelectOptions(selectId, optionDefs, isValid) {
+  const el = document.getElementById(selectId);
+  if (!el) return;
+  const prevValue = el.value;
+  el.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '指定なし';
+  el.appendChild(placeholder);
+  let stillValid = false;
+  optionDefs.forEach(def => {
+    if (!isValid(def.value)) return;
+    const opt = document.createElement('option');
+    opt.value = def.value;
+    opt.textContent = def.label;
+    el.appendChild(opt);
+    if (def.value === prevValue) stillValid = true;
+  });
+  el.value = stillValid ? prevValue : '';
+}
+
+// 月ピル群の有効/無効を切り替える（rebuildSelectOptionsのピル版）。
+// 無効化された月は選択も解除する。有効なままの月は選択状態を維持する。
+function rebuildMonthGrid(isValid) {
+  document.querySelectorAll('#monthGrid .month-pill').forEach(pill => {
+    const cb = pill.querySelector('input');
+    const valid = isValid(cb.value);
+    cb.disabled = !valid;
+    pill.classList.toggle('disabled', !valid);
+    if (!valid && cb.checked) {
+      cb.checked = false;
+      pill.classList.remove('active');
+    }
+  });
+}
+
+// 入力順（エリア＝経路の線 → 中心気圧 → 勢力 → 月）に沿って、
+// それより手前の条件と組み合わせた時に該当する台風が0件になる選択肢をリストから取り除く。
+function refreshFilterOptions() {
+  if (!areaBounds) {
+    rebuildSelectOptions('pressureMax', PRESSURE_OPTION_DEFS, () => true);
+    rebuildSelectOptions('intensityMin', INTENSITY_OPTION_DEFS, () => true);
+    rebuildMonthGrid(() => true);
+    updateAdvancedBadge();
+    return;
+  }
+
+  // 中心気圧：エリアのみを基準に有効な値を判定
+  rebuildSelectOptions('pressureMax', PRESSURE_OPTION_DEFS, (val) =>
+    countCandidatesFor({ pressureMax: parseFloat(val) }) > 0
+  );
+  const curPressure = getPressureFilterValue();
+
+  // 勢力：エリア＋（選択済みの）中心気圧を基準に判定
+  rebuildSelectOptions('intensityMin', INTENSITY_OPTION_DEFS, (val) =>
+    countCandidatesFor({ pressureMax: curPressure, minWindKt: parseFloat(val) }) > 0
+  );
+  const curIntensity = getIntensityFilterMinKt();
+
+  // 月：エリア＋中心気圧＋勢力を基準に、各月単独で候補が残るかを判定
+  rebuildMonthGrid((val) =>
+    countCandidatesFor({ pressureMax: curPressure, minWindKt: curIntensity, months: [parseInt(val, 10)] }) > 0
+  );
+  updateAdvancedBadge();
+}
+
+// 詳細設定トグルの脇に、現在設定中の条件を短く表示する
+function updateAdvancedBadge() {
+  const parts = [];
+  if (getPressureFilterValue() !== null) parts.push('気圧');
+  if (getIntensityFilterMinKt() !== null) parts.push('勢力');
+  const months = getMonthFilterValues();
+  if (months !== null) parts.push(`月×${months.length}`);
+  document.getElementById('advancedBadge').textContent = parts.length ? `設定中: ${parts.join('・')}` : '';
+}
+
+function updateAreaCount() {
+  if (!areaBounds) {
+    areaCountEl.textContent = '–';
+  } else {
+    areaCountEl.textContent = getEffectiveTracks().length;
+  }
+  refreshFilterOptions();
+  updateButtons();
+}
+
+// 指標の切り替え：スコア関数・結果一覧での表示ラベル・ツールチップをまとめて管理
+const METRICS = {
+  frechet: {
+    fn: frechetScore,
+    label: 'フレシェ',
+    tooltip: 'フレシェ距離：経路中で最も離れた瞬間の距離(km)',
+    desc: '経路中で最も離れた瞬間の距離で評価します。一部分でも大きくズレる経路を厳しく評価します。',
+  },
+  avg: {
+    fn: avgDeviationScore,
+    label: '平均乖離幅',
+    tooltip: '平均乖離幅：弧長で正規化した対応点間距離の平均(km)',
+    desc: '経路全体にわたる平均的なズレの幅で評価します。一時的な大きなズレより、全体としての近さを重視します。',
+  },
+  rms: {
+    fn: rmsDeviationScore,
+    label: 'RMS乖離幅',
+    tooltip: 'RMS乖離幅：弧長で正規化した対応点間距離の二乗平均平方根(km)',
+    desc: '平均乖離幅に似ていますが、大きくズレる区間があるとスコアが悪化しやすい指標です（平均とフレシェ距離の中間的な性質）。',
+  },
+  dtw: {
+    fn: dtwScore,
+    label: 'DTW',
+    tooltip: 'DTW：対応付けながら整合させた後の平均測地距離(km)',
+    desc: '観測点の間隔が違っても対応関係を伸縮させて整合させ、その平均距離で評価します。速度差や観測密度の違いに強い指標です。',
+  },
+  hausdorff: {
+    fn: hausdorffScore,
+    label: 'ハウスドルフ',
+    tooltip: 'ハウスドルフ距離：時系列を問わず評価した最大の最短距離(km)',
+    desc: '通過した順序を問わず、形の近さだけを評価します。多少の速度差や小さな蛇行・後戻りに強い一方、順序が違っても近いと判定されうる点に注意してください。',
+  },
+  chamfer: {
+    fn: chamferScore,
+    label: 'チャムファー',
+    tooltip: 'チャムファー距離：時系列を問わず評価した最短距離の平均(km)',
+    desc: 'ハウスドルフ距離と同様に順序を問わず形の近さを評価しますが、最大値ではなく平均を取るため、一部の外れ値に振り回されにくく安定した評価になります。',
+  },
+};
+
+function updateMetricDesc() {
+  const key = document.getElementById('metricSelect').value;
+  document.getElementById('metricDesc').textContent = METRICS[key].desc;
+}
+
+// 「類似経路を検索」を実行した後に、もう一度「経路を描く」/「エリアを描く」を押した際、
+// 古い経路・エリアを自動でクリアしてから新規描画に入れるようにするためのフラグ。
+let routeNeedsResetAfterSearch = false;
+let areaNeedsResetAfterSearch = false;
+
+function runSearch() {
+  if (!areaBounds) return; // エリア指定（02）が必須
+  const hasUserRoute = userPoints.length >= 2;
+  const candidates = getEffectiveTracks();
+  if (candidates.length === 0) return;
+  if (!hasUserRoute && candidates.length > AREA_ONLY_SEARCH_MAX) return;
+
+  showSearchOverlay(true);
+  btnSearch.disabled = true;
+  // setTimeoutで一度描画をブラウザに返すことで、「検索中です」の表示を
+  // 実際にペイントさせてから（画面が固まったように見えないように）重い計算を始める。
+  setTimeout(() => {
+    let scored;
+    if (hasUserRoute) {
+      // 候補側（c.points）はエリア内区間だけに切り詰められているため、
+      // 自分の経路も同じエリアでクリップしてから比較する（同じ範囲どうしで比較しないと
+      // スコアが実感と合わなくなるため）。エリアを通っていない場合は経路全体を使う。
+      const userClipped = clipToArea(userPoints, areaBounds);
+      const userForCompare = (userClipped && userClipped.length >= 2) ? userClipped : userPoints;
+
+      const ignoreDir = document.getElementById('ignoreDir').checked;
+      const userRev = ignoreDir ? [...userForCompare].reverse() : null;
+      const metric = document.getElementById('metricSelect').value;
+      lastMetric = metric;
+      const scoreFn = METRICS[metric].fn;
+      scored = candidates.map(c => {
+        let score = scoreFn(userForCompare, c.points);
+        if (ignoreDir) score = Math.min(score, scoreFn(userRev, c.points));
+        return { track: c.track, points: c.points, score };
+      });
+      scored.sort((a, b) => a.score - b.score);
+    } else {
+      // 経路未指定：エリアで絞り込まれた台風をそのまま一覧表示（スコアなし）
+      scored = candidates.map(c => ({ track: c.track, points: c.points, score: null }));
+      scored.sort((a, b) => {
+        if (a.track.year !== b.track.year) return String(b.track.year).localeCompare(String(a.track.year));
+        return String(a.track.name).localeCompare(String(b.track.name));
+      });
+    }
+    lastResults = scored.slice(0, 12);
+    baseResults = lastResults.slice();
+    sortMode = 'default';
+    const sortSelectEl = document.getElementById('sortSelect');
+    if (sortSelectEl) sortSelectEl.value = 'default';
+    renderResults();
+    showSearchOverlay(false);
+    routeNeedsResetAfterSearch = true;
+    areaNeedsResetAfterSearch = true;
+    updateButtons();
+  }, 30);
+}
+
+function showSearchOverlay(show) {
+  document.getElementById('searchOverlay').style.display = show ? 'flex' : 'none';
+}
+
+/* =========================================================
+   結果表示
+   ========================================================= */
+function clearResults() {
+  lastResults = [];
+  baseResults = [];
+  sortMode = 'default';
+  const sortSelectEl = document.getElementById('sortSelect');
+  if (sortSelectEl) sortSelectEl.value = 'default';
+  document.getElementById('results').innerHTML =
+    '<div class="empty">経路を描いて「類似経路を検索」を押すと、ここに近い過去の台風がランキング表示されます。</div>';
+  candidateLayer.clearLayers();
+  if (highlightLayer) { map.removeLayer(highlightLayer); highlightLayer = null; }
+}
+
+function typhoonDetailUrl(t) {
+  const num = String(t.id).slice(-2).padStart(2, '0');
+  return `https://weathernews.jp/onebox/typhoon/${t.year}/${num}/`;
+}
+
+// 台風が通過した月（複数月にまたがる場合は範囲）を表示用ラベルにする
+function trackMonthLabel(points) {
+  const months = new Set();
+  points.forEach(p => {
+    if (p.dt && p.dt.length >= 7) months.add(parseInt(p.dt.substring(5, 7), 10));
+  });
+  if (months.size === 0) return '';
+  const sorted = Array.from(months).sort((a, b) => a - b);
+  return sorted.length === 1 ? `${sorted[0]}月` : `${sorted[0]}〜${sorted[sorted.length - 1]}月`;
+}
+
+// 結果の並び替え（デフォルト＝検索順、中心気圧・勢力・年で並び替え可能）
+function cmpNullable(va, vb, asc) {
+  if (va === null && vb === null) return 0;
+  if (va === null) return 1;
+  if (vb === null) return -1;
+  return asc ? va - vb : vb - va;
+}
+function sortComparator(mode) {
+  switch (mode) {
+    case 'pressureAsc': return (a, b) => cmpNullable(trackMinPressure(a.track.points), trackMinPressure(b.track.points), true);
+    case 'pressureDesc': return (a, b) => cmpNullable(trackMinPressure(a.track.points), trackMinPressure(b.track.points), false);
+    case 'windDesc': return (a, b) => cmpNullable(trackMaxWindKt(a.track.points), trackMaxWindKt(b.track.points), false);
+    case 'windAsc': return (a, b) => cmpNullable(trackMaxWindKt(a.track.points), trackMaxWindKt(b.track.points), true);
+    case 'yearDesc': return (a, b) => String(b.track.year).localeCompare(String(a.track.year));
+    case 'yearAsc': return (a, b) => String(a.track.year).localeCompare(String(b.track.year));
+    default: return null;
+  }
+}
+function applySort(mode) {
+  sortMode = mode;
+  const cmp = sortComparator(mode);
+  lastResults = cmp ? baseResults.slice().sort(cmp) : baseResults.slice();
+  renderResults();
+}
+document.getElementById('sortSelect').addEventListener('change', (e) => applySort(e.target.value));
+
+function renderResults() {
+  const el = document.getElementById('results');
+  if (lastResults.length === 0) {
+    el.innerHTML = '<div class="empty">一致する経路が見つかりませんでした。エリア絞り込みが厳しすぎないか確認してください。</div>';
+    candidateLayer.clearLayers();
+    if (highlightLayer) { map.removeLayer(highlightLayer); highlightLayer = null; }
+    return;
+  }
+  const hasScore = lastResults[0].score !== null;
+  const maxScore = hasScore ? Math.max(...lastResults.map(r => r.score)) : null;
+  el.innerHTML = '';
+  lastResults.forEach((r, idx) => {
+    const t = r.track;
+    const div = document.createElement('div');
+    div.className = 'result-item';
+    div.dataset.idx = idx;
+    const minP = t.points.map(p => parseFloat(p.pressure)).filter(v => !isNaN(v));
+    const minPStr = minP.length ? Math.min(...minP) + ' hPa' : '—';
+    const maxWindKt = trackMaxWindKt(t.points);
+    const strengthLabel = maxWindKt === null ? '' :
+      maxWindKt >= 105 ? '猛烈' : maxWindKt >= 85 ? '非常に強い' : maxWindKt >= 64 ? '強い' : '';
+    const strengthStr = strengthLabel ? ` ／ ${strengthLabel}` : '';
+    const windStr = maxWindKt !== null ? ` ／ 最大風速 ${maxWindKt}kt` : '';
+    const typhoonNum = parseInt(String(t.id).slice(-2), 10);
+    const typhoonNumStr = isNaN(typhoonNum) ? '' : ` ／ 台風${typhoonNum}号`;
+    const scoreHtml = hasScore
+      ? `<span class="result-score" title="${METRICS[lastMetric].tooltip}">${r.score.toFixed(0)} km</span>`
+      : `<span class="result-score">エリア内</span>`;
+    const barHtml = hasScore
+      ? `<div class="bar-track"><div class="bar-fill" style="width:${100 - (r.score / maxScore * 90)}%;"></div></div>`
+      : '';
+    div.innerHTML = `
+      <div class="result-top">
+        <span class="result-name"><span class="rank">#${idx + 1}</span>${t.name || '(無名)'} <span class="result-year">${t.year}年 ${trackMonthLabel(t.points)}${typhoonNumStr}</span></span>
+        <span class="result-right">
+          <a class="detail-link" href="${typhoonDetailUrl(t)}" target="_blank" rel="noopener" title="ウェザーニュースで詳細を見る">🔍</a>
+          ${scoreHtml}
+        </span>
+      </div>
+      ${barHtml}
+      <div class="result-meta">最低気圧 ${minPStr}${strengthStr}${windStr}</div>
+    `;
+    div.addEventListener('click', () => selectResult(idx));
+    div.querySelector('.detail-link').addEventListener('click', (e) => e.stopPropagation());
+    el.appendChild(div);
+  });
+  drawCandidates();
+  selectResult(0);
+}
+
+function defaultCursor() {
+  return (drawing || areaDrawingMode) ? 'crosshair' : '';
+}
+
+function drawCandidates() {
+  candidateLayer.clearLayers();
+  lastResults.forEach((r, idx) => {
+    const latlngs = r.track.points.map(p => [p.lat, p.lon]);
+    const visual = L.polyline(latlngs, {
+      color: '#4fd8cf', weight: 1.4, opacity: .35, interactive: false
+    });
+    // クリック判定を広げるための透明な太い当たり判定ライン
+    const hit = L.polyline(latlngs, { color: '#4fd8cf', weight: 12, opacity: 0 });
+    hit.on('click', (e) => {
+      L.DomEvent.stopPropagation(e);
+      selectResult(idx);
+    });
+    hit.on('mouseover', () => {
+      map.getContainer().style.cursor = 'pointer';
+      visual.setStyle({ weight: 3, opacity: .8 });
+    });
+    hit.on('mouseout', () => {
+      map.getContainer().style.cursor = defaultCursor();
+      visual.setStyle({ weight: 1.4, opacity: .35 });
+    });
+    candidateLayer.addLayer(visual);
+    candidateLayer.addLayer(hit);
+  });
+}
+
+function selectResult(idx) {
+  document.querySelectorAll('.result-item').forEach(el => el.classList.remove('active'));
+  const item = document.querySelector(`.result-item[data-idx="${idx}"]`);
+  if (item) { item.classList.add('active'); item.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+
+  if (highlightLayer) { map.removeLayer(highlightLayer); highlightLayer = null; }
+  const r = lastResults[idx];
+  if (!r) return;
+  const fullLatlngs = r.track.points.map(p => [p.lat, p.lon]);
+  const usedLatlngs = r.points.map(p => [p.lat, p.lon]);
+  highlightLayer = L.layerGroup();
+  // 台風の全区間は淡く、実際にスコアに使った区間は濃く表示
+  L.polyline(fullLatlngs, { color: '#e8608a', weight: 1.6, opacity: .4 }).addTo(highlightLayer);
+  L.polyline(usedLatlngs, { color: '#e8608a', weight: 3.2, opacity: .95 }).addTo(highlightLayer);
+  r.points.forEach((p, i) => {
+    if (i % 4 !== 0) return;
+    L.circleMarker([p.lat, p.lon], {
+      radius: 2.5, color: '#e8608a', weight: 1, fillColor: '#e8608a', fillOpacity: .9
+    }).addTo(highlightLayer);
+  });
+  highlightLayer.addTo(map);
+}
+
+setDrawingMode(true);
+updateButtons();
+updateAreaCount();
+updateMetricDesc();
+loadTyphoonData();
+</script>
+</body>
+</html>
