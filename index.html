@@ -126,6 +126,14 @@
 
   .empty{ padding:24px 18px; color:var(--text-dim); font-size:12px; line-height:1.7; }
   .rank{ color:var(--cyan); font-weight:700; margin-right:6px;}
+  .rank.rank-na{
+    color:var(--text-dim); font-weight:500; font-size:10.5px;
+    border:1px solid var(--line); border-radius:2px; padding:1px 5px;
+    text-transform:uppercase; letter-spacing:.04em; vertical-align:1px;
+  }
+  .result-item.unranked{ opacity:.55; }
+  .result-item.unranked:hover{ opacity:.85; }
+  .result-meta .no-data{ color:var(--text-dim); font-style:italic; }
 
   /* ---------- Map ---------- */
   #mapwrap{ position:relative; --results-panel-width: 320px; }
@@ -1410,6 +1418,13 @@ function sortComparator(mode) {
     default: return null;
   }
 }
+// 現在の並び替えモードで使われる値を返す（該当データが無ければ null）
+// pressure/wind 以外のモードでは判定不要なので undefined を返す
+function currentSortValue(mode, points) {
+  if (mode === 'pressureAsc' || mode === 'pressureDesc') return trackMinPressure(points);
+  if (mode === 'windDesc' || mode === 'windAsc') return trackMaxWindKt(points);
+  return undefined;
+}
 function applySort(mode) {
   sortMode = mode;
   const cmp = sortComparator(mode);
@@ -1429,18 +1444,22 @@ function renderResults() {
   const hasScore = lastResults[0].score !== null;
   const maxScore = hasScore ? Math.max(...lastResults.map(r => r.score)) : null;
   el.innerHTML = '';
+  let rankCounter = 0;
   lastResults.forEach((r, idx) => {
     const t = r.track;
     const div = document.createElement('div');
-    div.className = 'result-item';
+    const sortVal = currentSortValue(sortMode, t.points);
+    const isUnranked = sortVal === null; // 現在の並び替え基準に必要なデータが無い
+    div.className = isUnranked ? 'result-item unranked' : 'result-item';
     div.dataset.idx = idx;
     const minP = t.points.map(p => parseFloat(p.pressure)).filter(v => !isNaN(v));
-    const minPStr = minP.length ? Math.min(...minP) + ' hPa' : '—';
+    const minPStr = minP.length ? Math.min(...minP) + ' hPa' : '<span class="no-data">データなし</span>';
     const maxWindKt = trackMaxWindKt(t.points);
     const strengthLabel = maxWindKt === null ? '' :
       maxWindKt >= 105 ? '猛烈' : maxWindKt >= 85 ? '非常に強い' : maxWindKt >= 64 ? '強い' : '';
     const strengthStr = strengthLabel ? ` ／ ${strengthLabel}` : '';
-    const windStr = maxWindKt !== null ? ` ／ 最大風速 ${maxWindKt}kt` : '';
+    const windStr = maxWindKt !== null ? ` ／ 最大風速 ${maxWindKt}kt` :
+      ((sortMode === 'windDesc' || sortMode === 'windAsc') ? ' ／ <span class="no-data">最大風速 データなし</span>' : '');
     const typhoonNum = parseInt(String(t.id).slice(-2), 10);
     const typhoonNumStr = isNaN(typhoonNum) ? '' : ` ／ 台風${typhoonNum}号`;
     const scoreHtml = hasScore
@@ -1449,9 +1468,16 @@ function renderResults() {
     const barHtml = hasScore
       ? `<div class="bar-track"><div class="bar-fill" style="width:${100 - (r.score / maxScore * 90)}%;"></div></div>`
       : '';
+    let rankHtml;
+    if (isUnranked) {
+      rankHtml = `<span class="rank rank-na" title="この並び替え基準に必要なデータが記録されていないため、ランキングの対象外です">ランク外</span>`;
+    } else {
+      rankCounter++;
+      rankHtml = `<span class="rank">#${rankCounter}</span>`;
+    }
     div.innerHTML = `
       <div class="result-top">
-        <span class="result-name"><span class="rank">#${idx + 1}</span>${t.name || '(無名)'} <span class="result-year">${t.year}年 ${trackMonthLabel(t.points)}${typhoonNumStr}</span></span>
+        <span class="result-name">${rankHtml}${t.name || '(無名)'} <span class="result-year">${t.year}年 ${trackMonthLabel(t.points)}${typhoonNumStr}</span></span>
         <span class="result-right">
           <a class="detail-link" href="${typhoonDetailUrl(t)}" target="_blank" rel="noopener" title="ウェザーニュースで詳細を見る">🔍</a>
           ${scoreHtml}
