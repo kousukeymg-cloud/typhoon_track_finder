@@ -1091,35 +1091,86 @@ function segIntersectsBBox(p1, p2, b) {
   return tmin <= tmax;
 }
 
-// 経路のうち、エリアと実際に関わりのある区間だけを切り出す。
-// 点自体がエリア内にある場合だけでなく、隣接区間の線がエリアを
-// 通過している場合もその点を範囲に含める。
-// 台風がエリアを一度離れてから再び入り直す経路の場合、「最初にヒットした点」〜
-// 「最後にヒットした点」を単純にsliceすると、間に挟まるエリア外の区間（迷走・
-// 転向など）までスコア計算に混入してしまうため、hitが連続する区間（ラン）に
-// 分割し、最も長いランだけをエリア通過区間として採用する。
-function clipToArea(points, b) {
-  const hits = points.map((p, i) => {
-    let hit = inBBox(p, b);
-    if (!hit && i > 0) hit = segIntersectsBBox(points[i - 1], p, b);
-    if (!hit && i < points.length - 1) hit = segIntersectsBBox(p, points[i + 1], b);
-    return hit;
-  });
+// 2点間を割合tで線形補間する（エリア境界での正確な交点座標を求めるため）
+function lerpPoint(p1, p2, t) {
+  return { lat: p1.lat + (p2.lat - p1.lat) * t, lon: p1.lon + (p2.lon - p1.lon) * t };
+}
 
-  let bestStart = -1, bestLen = 0;
-  let curStart = -1;
-  for (let i = 0; i <= hits.length; i++) {
-    const hit = i < hits.length && hits[i];
-    if (hit) {
-      if (curStart === -1) curStart = i;
-    } else if (curStart !== -1) {
-      const len = i - curStart;
-      if (len > bestLen) { bestLen = len; bestStart = curStart; }
-      curStart = -1;
+// 線分とエリア（矩形）の交差区間をパラメータt（0〜1）で求める（Liang-Barsky法）。
+// 交差しない場合はnull。segIntersectsBBoxの真偽値版と違い、実際に境界で
+// 線を切断できるよう交差区間そのものを返す。
+function clipSegmentT(p1, p2, b) {
+  const x0 = p1.lon, y0 = p1.lat, dx = p2.lon - p1.lon, dy = p2.lat - p1.lat;
+  let tmin = 0, tmax = 1;
+  const clipEdge = (pVal, qVal) => {
+    if (pVal === 0) return qVal >= 0;
+    const r = qVal / pVal;
+    if (pVal < 0) {
+      if (r > tmax) return false;
+      if (r > tmin) tmin = r;
+    } else {
+      if (r < tmin) return false;
+      if (r < tmax) tmax = r;
+    }
+    return true;
+  };
+  if (!clipEdge(-dx, x0 - b.lonMin)) return null;
+  if (!clipEdge(dx, b.lonMax - x0)) return null;
+  if (!clipEdge(-dy, y0 - b.latMin)) return null;
+  if (!clipEdge(dy, b.latMax - y0)) return null;
+  if (tmin > tmax) return null;
+  return { tmin, tmax };
+}
+
+// 経路をエリア（矩形）の境界で厳密に切断し、エリア内に実際に収まる
+// 区間だけを、途切れた複数の折れ線（配列の配列）として返す。
+// clipToAreaと違い、エリアの外に出ている部分は一切含めない
+// （表示上、ユーザーが描いた線と同じ範囲で見比べられるようにするため）。
+function clipToAreaStrictSegments(points, b) {
+  const segments = [];
+  let current = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i], p2 = points[i + 1];
+    const clip = clipSegmentT(p1, p2, b);
+    if (!clip) {
+      if (current.length >= 2) segments.push(current);
+      current = [];
+      continue;
+    }
+    const { tmin, tmax } = clip;
+    const startPt = tmin <= 1e-9 ? p1 : lerpPoint(p1, p2, tmin);
+    const endPt = tmax >= 1 - 1e-9 ? p2 : lerpPoint(p1, p2, tmax);
+    if (current.length === 0) {
+      current.push(startPt);
+    } else if (tmin > 1e-9) {
+      // 直前の区間との間にエリア外の隙間がある＝新しい折れ線として開始
+      segments.push(current);
+      current = [startPt];
+    }
+    current.push(endPt);
+    if (tmax < 1 - 1e-9) {
+      // このセグメントの途中でエリアから出た＝ここで折れ線を確定
+      segments.push(current);
+      current = [];
     }
   }
-  if (bestStart === -1) return null;
-  return points.slice(bestStart, bestStart + bestLen);
+  if (current.length >= 2) segments.push(current);
+  return segments;
+}
+
+// 経路のうち、エリアと関わりのある最初の点〜最後の点までを切り出す。
+// 点自体がエリア内にある場合だけでなく、隣接区間の線がエリアを
+// 通過している場合もその点を範囲に含める。
+function clipToArea(points, b) {
+  let firstIdx = -1, lastIdx = -1;
+  for (let i = 0; i < points.length; i++) {
+    let hit = inBBox(points[i], b);
+    if (!hit && i > 0) hit = segIntersectsBBox(points[i - 1], points[i], b);
+    if (!hit && i < points.length - 1) hit = segIntersectsBBox(points[i], points[i + 1], b);
+    if (hit) { if (firstIdx === -1) firstIdx = i; lastIdx = i; }
+  }
+  if (firstIdx === -1) return null;
+  return points.slice(firstIdx, lastIdx + 1);
 }
 
 // 台風の強さ（気象庁の階級）：最大風速(kt)に対応
@@ -1558,12 +1609,22 @@ function selectResult(idx) {
   const r = lastResults[idx];
   if (!r) return;
   const fullLatlngs = r.track.points.map(p => [p.lat, p.lon]);
-  const usedLatlngs = r.points.map(p => [p.lat, p.lon]);
   highlightLayer = L.layerGroup();
-  // 台風の全区間は淡く、実際にスコアに使った区間は濃く表示
+  // 台風の全区間は淡く表示
   L.polyline(fullLatlngs, { color: '#e8608a', weight: 1.6, opacity: .4 }).addTo(highlightLayer);
-  L.polyline(usedLatlngs, { color: '#e8608a', weight: 3.2, opacity: .95 }).addTo(highlightLayer);
-  r.points.forEach((p, i) => {
+  // 実際にスコアに使った区間のうち、ユーザーが描いたエリアの中に収まる部分だけを
+  // 太線で表示する（エリアをまたいで外に出た部分は含めない）。これにより、
+  // ユーザーが描いた経路（アンバー色の線）と同じ範囲で見比べられる。
+  const usedSegments = areaBounds
+    ? clipToAreaStrictSegments(r.points, areaBounds)
+    : [r.points];
+  usedSegments.forEach(seg => {
+    const usedLatlngs = seg.map(p => [p.lat, p.lon]);
+    L.polyline(usedLatlngs, { color: '#e8608a', weight: 3.2, opacity: .95 }).addTo(highlightLayer);
+  });
+  // マーカーも同様に、エリア内に収まる点のみ表示する
+  const markerPoints = areaBounds ? r.points.filter(p => inBBox(p, areaBounds)) : r.points;
+  markerPoints.forEach((p, i) => {
     if (i % 4 !== 0) return;
     L.circleMarker([p.lat, p.lon], {
       radius: 2.5, color: '#e8608a', weight: 1, fillColor: '#e8608a', fillOpacity: .9
