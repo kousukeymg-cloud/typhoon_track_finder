@@ -5,7 +5,7 @@
 
 ![status](https://img.shields.io/badge/type-static%20HTML-4fd8cf) ![data](https://img.shields.io/badge/data-JMA%20Best%20Track-e8a33d)
 
-**🔗 台風トレース検索：https://awg-yk-cloud.github.io/typhoon_track_finder/**
+**🔗 台風トレース検索：https://awg-yk.github.io/typhoon_track_finder/**
 
 ## できること
 
