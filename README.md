@@ -1,9 +1,11 @@
-[README.md](https://github.com/user-attachments/files/30108548/README.md)
+[README.md](https://github.com/user-attachments/files/30109074/README.md)
 # 台風トレース検索 (Typhoon Track Similarity Console)
 
 地図上に自分で経路（トレース）を描くと、気象庁のベストトラックデータの中から**形が似ている過去の台風**をランキング形式で検索できるWebツールです。サーバー不要・単一HTMLファイルで動作します。
 
 ![status](https://img.shields.io/badge/type-static%20HTML-4fd8cf) ![data](https://img.shields.io/badge/data-JMA%20Best%20Track-e8a33d)
+
+**🔗 台風トレース検索：https://kousukeymg-cloud.github.io/typhoon_track_finder/**
 
 ## できること
 
@@ -61,12 +63,10 @@ https://www.jma.go.jp/jma/jma-eng/jma-center/rsmc-hp-pub-eg/besttrack.html
 
 本ツールは経路の形状の類似性を機械的に比較する簡易ツールであり、防災上の判断や公式な台風進路予報の代替となるものではありません。最新・正式な情報は気象庁の発表をご確認ください。
 
+## フィードバック・不具合報告
+
+改善してほしい点、追加してほしい機能、不具合などがありましたら、お気軽にこのリポジトリの [Issues](../../issues) からご連絡ください。
+
 ## ライセンス
 
 MIT License のもとで公開しています。自由に利用・改変・再配布いただけますが、著作権表示は保持してください。本ソフトウェアは「現状有姿」で提供され、利用によって生じたいかなる損害についても作者は責任を負いません。
-
-## ご意見・ご要望
-
-ご利用いただきありがとうございます。
-「こんな機能が欲しい」「ここを改善してほしい」「不具合を見つけた」などがありましたら、GitHubのIssueよりお気軽にお知らせください。
-皆様からいただいたご意見を参考に、より使いやすいシステムを目指して改善を続けていきます。
