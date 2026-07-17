@@ -137,7 +137,12 @@
 
   /* ---------- Map ---------- */
   #mapwrap{ position:relative; --results-panel-width: 320px; }
-  #map{ width:100%; height:100%; background:#0a0f16; }
+  #map{
+    width:100%; height:100%; background:#0a0f16;
+    /* エリア/経路をドラッグ描画する際、ズームボタン等のテキストが
+       ブラウザ標準のテキスト選択でハイライトされてしまうのを防ぐ */
+    -webkit-user-select:none; -moz-user-select:none; user-select:none;
+  }
   .leaflet-container{ font-family:'JetBrains Mono', monospace; }
   .city-label{
     font-size:10.5px; color:var(--text-dim); white-space:nowrap;
