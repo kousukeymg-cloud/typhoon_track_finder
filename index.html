@@ -312,12 +312,9 @@
       <div class="filter-field" style="margin-top:12px;">
         <label for="metricSelect">類似度の指標</label>
         <select id="metricSelect">
-          <option value="frechet" selected>フレシェ距離</option>
+          <option value="chamfer" selected>チャムファー距離</option>
           <option value="avg">平均乖離幅（弧長正規化）</option>
           <option value="rms">RMS乖離幅（弧長正規化）</option>
-          <option value="dtw">DTW平均距離</option>
-          <option value="hausdorff">ハウスドルフ距離</option>
-          <option value="chamfer">チャムファー距離</option>
         </select>
         <div id="metricDesc" style="font-size:11px; color:var(--text-dim); margin-top:6px; line-height:1.5;"></div>
       </div>
@@ -378,7 +375,7 @@ let highlightLayer = null;
 let lastResults = [];
 let baseResults = [];
 let sortMode = 'default';
-let lastMetric = 'frechet';
+let lastMetric = 'chamfer';
 let areaBounds = null;    // {latMin,latMax,lonMin,lonMax}
 let areaDrawingMode = false;
 let areaDragStart = null;   // ドラッグ開始地点（矩形の1つ目の角）
@@ -882,67 +879,6 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
-// DTW（動的時間伸縮法）: 点数や間隔が揃っていない2つの経路を、最も対応が
-// 良くなるように伸縮させながら整合させ、整合後の平均測地距離(km)をスコアとして返す。
-// 弧長ベースのavgDeviationScoreと違い、点の「密度」（観測間隔）の違いに応じて
-// 対応関係が伸び縮みするため、一部区間だけ観測点が密/疎な経路の比較に強い。
-// 弱点：区間全体の「平均」を取るため、一部だけ大きくズレていても他の部分の
-// 近さで打ち消されてしまい、見た目ほど近くない候補が上位に来ることがある。
-function dtwScore(a, b) {
-  const n = a.length, m = b.length;
-  const D = new Array(n + 1);
-  for (let i = 0; i <= n; i++) D[i] = new Float64Array(m + 1).fill(Infinity);
-  D[0][0] = 0;
-  for (let i = 1; i <= n; i++) {
-    for (let j = 1; j <= m; j++) {
-      const cost = haversineKm(a[i - 1].lat, a[i - 1].lon, b[j - 1].lat, b[j - 1].lon);
-      D[i][j] = cost + Math.min(D[i - 1][j], D[i][j - 1], D[i - 1][j - 1]);
-    }
-  }
-  // 整合経路の長さで割って「1ステップあたりの平均距離」に正規化
-  let i = n, j = m, steps = 0;
-  while (i > 0 || j > 0) {
-    steps++;
-    if (i === 0) { j--; }
-    else if (j === 0) { i--; }
-    else {
-      const diag = D[i - 1][j - 1], up = D[i - 1][j], left = D[i][j - 1];
-      if (diag <= up && diag <= left) { i--; j--; }
-      else if (up < left) { i--; }
-      else { j--; }
-    }
-  }
-  return D[n][m] / steps;
-}
-
-// 離散フレシェ距離（Discrete Fréchet Distance）：
-// 「人と犬が、それぞれの経路上を（後戻りせず）同時に歩くとき、
-//   2人を結ぶリードの長さが常に最短で済むように歩いた場合の、
-//   最大リード長」に相当するスコア（km）。
-// DTWの「平均」と違い「経路中で最も離れた瞬間」を評価するため、
-// 一部だけ大きく逸れる経路（似ているようで似ていない経路）を
-// 正しく低評価にできる。経路の形状比較でDTWより一般的に好まれる指標。
-function frechetScore(a, b) {
-  const n = a.length, m = b.length;
-  const ca = new Array(n);
-  for (let i = 0; i < n; i++) ca[i] = new Float64Array(m).fill(-1);
-  function dist(i, j) {
-    return haversineKm(a[i].lat, a[i].lon, b[j].lat, b[j].lon);
-  }
-  function c(i, j) {
-    if (ca[i][j] > -1) return ca[i][j];
-    let val;
-    if (i === 0 && j === 0) val = dist(0, 0);
-    else if (i > 0 && j === 0) val = Math.max(c(i - 1, 0), dist(i, 0));
-    else if (i === 0 && j > 0) val = Math.max(c(0, j - 1), dist(0, j));
-    else if (i > 0 && j > 0) val = Math.max(Math.min(c(i - 1, j), c(i - 1, j - 1), c(i, j - 1)), dist(i, j));
-    else val = Infinity;
-    ca[i][j] = val;
-    return val;
-  }
-  return c(n - 1, m - 1);
-}
-
 // 弧長で累積距離を求め、割合（0〜1）ごとに等間隔サンプリングした点列を返す。
 // 点数や間隔が揃っていない2経路を、同じ「進行度合い」で比較できるように揃える。
 function resampleByArcLength(points, n) {
@@ -1009,40 +945,17 @@ function rmsDeviationScore(a, b, n = 101) {
   return Math.sqrt(sum / (n - 1));
 }
 
-// ハウスドルフ距離（Discrete Hausdorff Distance）：
-// 「片方の経路上の各点について、もう片方の経路上で最も近い点までの距離」を求め、
-// その中の最大値を両方向（a→b、b→a）で計算し、大きい方を採用したもの。
-// フレシェ距離と違い時系列的な対応（後戻りしない同時進行）を仮定しないため、
-// 同じような場所を通っていれば、多少速度が違ったり、蛇行や小さな後戻りが
-// あっても形状の近さとして評価できる。逆に「通過した順序」は考慮しないため、
-// 似た場所を逆順や別ルートでなぞっているだけの経路も近いと判定されうる点に注意。
-function hausdorffScore(a, b) {
-  function directed(p, q) {
-    let worst = 0;
-    for (const pp of p) {
-      let best = Infinity;
-      for (const qq of q) {
-        const d = haversineKm(pp.lat, pp.lon, qq.lat, qq.lon);
-        if (d < best) best = d;
-      }
-      if (best > worst) worst = best;
-    }
-    return worst;
-  }
-  return Math.max(directed(a, b), directed(b, a));
-}
-
 // チャムファー距離（Chamfer Distance）：
-// ハウスドルフ距離と同じく「各点から相手の経路上で最も近い点までの距離」を使うが、
-// 最大値ではなく両方向の平均を取る。ハウスドルフ距離（最悪の1点）と
-// 平均乖離幅（時系列順の対応）の中間にあたる指標で、時系列の対応は仮定しない
-// （ハウスドルフ距離と同様、順序を問わない）一方、外れ値1点でスコアが
-// 決まってしまうハウスドルフ距離より安定した「全体としての形の近さ」を測れる。
+// 経路上の各点から相手の経路上で最も近い点までの距離を求め、その平均を
+// 両方向（a→b、b→a）で計算して平均したもの。外れ値1点でスコアが決まって
+// しまうことがなく、安定した「全体としての形の近さ」を測れる。
 // サンプリング密度の偏りを避けるため、弧長正規化した再サンプリング点で計算する。
-// 弱点：順序を考慮しないため、蛇行・後戻り・逆走でも位置が近ければ低評価（＝近い）
-// になりうる点と、経路の一部だけが近いケースでも小さめに出やすい点はハウスドルフ
-// 距離と共通の注意点。
-function chamferScore(a, b, n = 101) {
+// 弱点：時系列の対応（進行順）は仮定しないため、蛇行・停滞・ループが絡む
+// 経路でも位置が近ければ近いと判定されうる点には注意。
+// 計算コストが再サンプリング点数の2乗（総当たりの最近傍探索）で増えるため、
+// 平均乖離幅・RMS乖離幅（点数に比例）より重い。精度への影響がごく小さい
+// 範囲（n=101→51で相対誤差は中央値1%程度）で解像度を落とし、体感速度を優先している。
+function chamferScore(a, b, n = 51) {
   const ra = resampleByArcLength(a, n);
   const rb = resampleByArcLength(b, n);
   function directedMean(p, q) {
@@ -1345,11 +1258,11 @@ function updateAreaCount() {
 
 // 指標の切り替え：スコア関数・結果一覧での表示ラベル・ツールチップをまとめて管理
 const METRICS = {
-  frechet: {
-    fn: frechetScore,
-    label: 'フレシェ',
-    tooltip: 'フレシェ距離：経路中で最も離れた瞬間の距離(km)',
-    desc: '経路中で最も離れた瞬間の距離で評価します。一部分でも大きくズレる経路を厳しく評価します。',
+  chamfer: {
+    fn: chamferScore,
+    label: 'チャムファー',
+    tooltip: 'チャムファー距離：時系列を問わず評価した最短距離の平均(km)',
+    desc: '各点から相手の経路上で最も近い点までの距離を求め、その平均で評価します。一部の外れ値に振り回されにくく安定した評価になります（通過順序は考慮しません）。',
   },
   avg: {
     fn: avgDeviationScore,
@@ -1361,25 +1274,7 @@ const METRICS = {
     fn: rmsDeviationScore,
     label: 'RMS乖離幅',
     tooltip: 'RMS乖離幅：弧長で正規化した対応点間距離の二乗平均平方根(km)',
-    desc: '平均乖離幅に似ていますが、大きくズレる区間があるとスコアが悪化しやすい指標です（平均とフレシェ距離の中間的な性質）。',
-  },
-  dtw: {
-    fn: dtwScore,
-    label: 'DTW',
-    tooltip: 'DTW：対応付けながら整合させた後の平均測地距離(km)',
-    desc: '観測点の間隔が違っても対応関係を伸縮させて整合させ、その平均距離で評価します。速度差や観測密度の違いに強い指標です。',
-  },
-  hausdorff: {
-    fn: hausdorffScore,
-    label: 'ハウスドルフ',
-    tooltip: 'ハウスドルフ距離：時系列を問わず評価した最大の最短距離(km)',
-    desc: '通過した順序を問わず、形の近さだけを評価します。多少の速度差や小さな蛇行・後戻りに強い一方、順序が違っても近いと判定されうる点に注意してください。',
-  },
-  chamfer: {
-    fn: chamferScore,
-    label: 'チャムファー',
-    tooltip: 'チャムファー距離：時系列を問わず評価した最短距離の平均(km)',
-    desc: 'ハウスドルフ距離と同様に順序を問わず形の近さを評価しますが、最大値ではなく平均を取るため、一部の外れ値に振り回されにくく安定した評価になります。',
+    desc: '平均乖離幅に似ていますが、大きくズレる区間があるとスコアが悪化しやすい指標です（平均と最悪ケース評価の中間的な性質）。',
   },
 };
 
