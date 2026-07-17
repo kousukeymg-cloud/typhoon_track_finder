@@ -413,10 +413,14 @@ let previewLineLayer = null;
    （cyberjapandata.gsi.go.jp）への通信が必要。
    出典: 国土地理院タイル (https://maps.gsi.go.jp/development/ichiran.html)
    ========================================================= */
+// 台風の定義（赤道より北・東経180度より西の北西太平洋、または南シナ海）に
+// 合わせて、地図の表示・操作可能範囲を南は赤道（緯度0度）までに制限する。
+// 南シナ海（おおむね緯度0〜23度・経度100〜121度）はこの範囲に含まれる。
+// maxBoundsViscosity を1.0にし、ドラッグ操作でも範囲外へはみ出せないようにする。
 const map = L.map('map', {
   zoomControl: true, attributionControl: true,
   minZoom: 3, maxZoom: 10,
-  maxBounds: [[-15, 90], [60, 180]], maxBoundsViscosity: 0.6
+  maxBounds: [[0, 90], [60, 180]], maxBoundsViscosity: 1.0
 }).setView([22, 132], 4);
 
 const GSI_ATTRIBUTION =
@@ -447,11 +451,11 @@ let labelLayer = L.layerGroup().addTo(map);
 
 function drawGraticule() {
   gratLayer.clearLayers();
-  for (let lat = -10; lat <= 60; lat += 10) {
+  for (let lat = 0; lat <= 60; lat += 10) {
     gratLayer.addLayer(L.polyline([[lat, 90], [lat, 180]], { color: GRAT_COLOR, weight: 1, opacity: .4, interactive: false }));
   }
   for (let lon = 90; lon <= 180; lon += 10) {
-    gratLayer.addLayer(L.polyline([[-15, lon], [60, lon]], { color: GRAT_COLOR, weight: 1, opacity: .4, interactive: false }));
+    gratLayer.addLayer(L.polyline([[0, lon], [60, lon]], { color: GRAT_COLOR, weight: 1, opacity: .4, interactive: false }));
   }
 }
 
