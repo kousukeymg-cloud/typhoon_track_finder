@@ -1067,30 +1067,6 @@ function inBBox(p, b) {
   return p.lat >= b.latMin && p.lat <= b.latMax && p.lon >= b.lonMin && p.lon <= b.lonMax;
 }
 
-// 2点を結ぶ線分が矩形エリアと交差するか（Liang-Barsky法）。
-// 両端点がエリア外でも、線がエリアを通過していれば true になる。
-function segIntersectsBBox(p1, p2, b) {
-  const x0 = p1.lon, y0 = p1.lat, dx = p2.lon - p1.lon, dy = p2.lat - p1.lat;
-  let tmin = 0, tmax = 1;
-  const clipEdge = (pVal, qVal) => {
-    if (pVal === 0) return qVal >= 0;
-    const r = qVal / pVal;
-    if (pVal < 0) {
-      if (r > tmax) return false;
-      if (r > tmin) tmin = r;
-    } else {
-      if (r < tmin) return false;
-      if (r < tmax) tmax = r;
-    }
-    return true;
-  };
-  if (!clipEdge(-dx, x0 - b.lonMin)) return false;
-  if (!clipEdge(dx, b.lonMax - x0)) return false;
-  if (!clipEdge(-dy, y0 - b.latMin)) return false;
-  if (!clipEdge(dy, b.latMax - y0)) return false;
-  return tmin <= tmax;
-}
-
 // 2点間を割合tで線形補間する（エリア境界での正確な交点座標を求めるため）
 function lerpPoint(p1, p2, t) {
   return { lat: p1.lat + (p2.lat - p1.lat) * t, lon: p1.lon + (p2.lon - p1.lon) * t };
@@ -1158,19 +1134,29 @@ function clipToAreaStrictSegments(points, b) {
   return segments;
 }
 
-// 経路のうち、エリアと関わりのある最初の点〜最後の点までを切り出す。
-// 点自体がエリア内にある場合だけでなく、隣接区間の線がエリアを
-// 通過している場合もその点を範囲に含める。
-function clipToArea(points, b) {
-  let firstIdx = -1, lastIdx = -1;
-  for (let i = 0; i < points.length; i++) {
-    let hit = inBBox(points[i], b);
-    if (!hit && i > 0) hit = segIntersectsBBox(points[i - 1], points[i], b);
-    if (!hit && i < points.length - 1) hit = segIntersectsBBox(points[i], points[i + 1], b);
-    if (hit) { if (firstIdx === -1) firstIdx = i; lastIdx = i; }
+// 折れ線の総弧長（km）
+function arcLengthKm(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += haversineKm(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
   }
-  if (firstIdx === -1) return null;
-  return points.slice(firstIdx, lastIdx + 1);
+  return total;
+}
+
+// 経路のうち、エリア（矩形）の境界で厳密に切ったときに実際に得られる区間を返す。
+// エリアを複数回出入りする経路の場合は、最も弧長が長い（＝最もエリア内を
+// 長く通過した）区間を代表区間として採用する。アルゴリズムのスコア計算・
+// 候補の絞り込み・表示（太線）のすべてで、この「エリア内に厳密に収まる区間」
+// のみを使う。
+function primaryAreaSegment(points, b) {
+  const segments = clipToAreaStrictSegments(points, b);
+  if (segments.length === 0) return null;
+  let best = segments[0], bestLen = arcLengthKm(segments[0]);
+  for (let i = 1; i < segments.length; i++) {
+    const len = arcLengthKm(segments[i]);
+    if (len > bestLen) { bestLen = len; best = segments[i]; }
+  }
+  return best;
 }
 
 // 台風の強さ（気象庁の階級）：最大風速(kt)に対応
@@ -1233,7 +1219,7 @@ function getEffectiveTracks() {
   const out = [];
   tracks.forEach(t => {
     if (!passesStrengthFilters(t.points)) return;
-    const clipped = clipToArea(t.points, areaBounds);
+    const clipped = primaryAreaSegment(t.points, areaBounds);
     if (clipped && clipped.length >= 2) out.push({ track: t, points: clipped });
   });
   return out;
@@ -1253,7 +1239,7 @@ function countCandidatesFor({ pressureMax = null, minWindKt = null, months = nul
       if (mw === null || mw < minWindKt) continue;
     }
     if (months !== null && !trackHasMonth(t.points, months)) continue;
-    const clipped = clipToArea(t.points, areaBounds);
+    const clipped = primaryAreaSegment(t.points, areaBounds);
     if (clipped && clipped.length >= 2) n++;
   }
   return n;
@@ -1421,10 +1407,10 @@ function runSearch() {
   setTimeout(() => {
     let scored;
     if (hasUserRoute) {
-      // 候補側（c.points）はエリア内区間だけに切り詰められているため、
-      // 自分の経路も同じエリアでクリップしてから比較する（同じ範囲どうしで比較しないと
+      // 候補側（c.points）はエリア内に厳密に収まる区間だけに切り詰められているため、
+      // 自分の経路も同じエリアで厳密にクリップしてから比較する（同じ範囲どうしで比較しないと
       // スコアが実感と合わなくなるため）。エリアを通っていない場合は経路全体を使う。
-      const userClipped = clipToArea(userPoints, areaBounds);
+      const userClipped = primaryAreaSegment(userPoints, areaBounds);
       const userForCompare = (userClipped && userClipped.length >= 2) ? userClipped : userPoints;
 
       const ignoreDir = document.getElementById('ignoreDir').checked;
@@ -1609,22 +1595,12 @@ function selectResult(idx) {
   const r = lastResults[idx];
   if (!r) return;
   const fullLatlngs = r.track.points.map(p => [p.lat, p.lon]);
+  const usedLatlngs = r.points.map(p => [p.lat, p.lon]);
   highlightLayer = L.layerGroup();
-  // 台風の全区間は淡く表示
+  // 台風の全区間は淡く、実際にスコアに使った区間（＝エリア内に厳密に収まる区間）は濃く表示
   L.polyline(fullLatlngs, { color: '#e8608a', weight: 1.6, opacity: .4 }).addTo(highlightLayer);
-  // 実際にスコアに使った区間のうち、ユーザーが描いたエリアの中に収まる部分だけを
-  // 太線で表示する（エリアをまたいで外に出た部分は含めない）。これにより、
-  // ユーザーが描いた経路（アンバー色の線）と同じ範囲で見比べられる。
-  const usedSegments = areaBounds
-    ? clipToAreaStrictSegments(r.points, areaBounds)
-    : [r.points];
-  usedSegments.forEach(seg => {
-    const usedLatlngs = seg.map(p => [p.lat, p.lon]);
-    L.polyline(usedLatlngs, { color: '#e8608a', weight: 3.2, opacity: .95 }).addTo(highlightLayer);
-  });
-  // マーカーも同様に、エリア内に収まる点のみ表示する
-  const markerPoints = areaBounds ? r.points.filter(p => inBBox(p, areaBounds)) : r.points;
-  markerPoints.forEach((p, i) => {
+  L.polyline(usedLatlngs, { color: '#e8608a', weight: 3.2, opacity: .95 }).addTo(highlightLayer);
+  r.points.forEach((p, i) => {
     if (i % 4 !== 0) return;
     L.circleMarker([p.lat, p.lon], {
       radius: 2.5, color: '#e8608a', weight: 1, fillColor: '#e8608a', fillOpacity: .9
