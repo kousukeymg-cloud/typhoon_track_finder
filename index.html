@@ -1091,19 +1091,35 @@ function segIntersectsBBox(p1, p2, b) {
   return tmin <= tmax;
 }
 
-// 経路のうち、エリアと関わりのある最初の点〜最後の点までを切り出す。
+// 経路のうち、エリアと実際に関わりのある区間だけを切り出す。
 // 点自体がエリア内にある場合だけでなく、隣接区間の線がエリアを
 // 通過している場合もその点を範囲に含める。
+// 台風がエリアを一度離れてから再び入り直す経路の場合、「最初にヒットした点」〜
+// 「最後にヒットした点」を単純にsliceすると、間に挟まるエリア外の区間（迷走・
+// 転向など）までスコア計算に混入してしまうため、hitが連続する区間（ラン）に
+// 分割し、最も長いランだけをエリア通過区間として採用する。
 function clipToArea(points, b) {
-  let firstIdx = -1, lastIdx = -1;
-  for (let i = 0; i < points.length; i++) {
-    let hit = inBBox(points[i], b);
-    if (!hit && i > 0) hit = segIntersectsBBox(points[i - 1], points[i], b);
-    if (!hit && i < points.length - 1) hit = segIntersectsBBox(points[i], points[i + 1], b);
-    if (hit) { if (firstIdx === -1) firstIdx = i; lastIdx = i; }
+  const hits = points.map((p, i) => {
+    let hit = inBBox(p, b);
+    if (!hit && i > 0) hit = segIntersectsBBox(points[i - 1], p, b);
+    if (!hit && i < points.length - 1) hit = segIntersectsBBox(p, points[i + 1], b);
+    return hit;
+  });
+
+  let bestStart = -1, bestLen = 0;
+  let curStart = -1;
+  for (let i = 0; i <= hits.length; i++) {
+    const hit = i < hits.length && hits[i];
+    if (hit) {
+      if (curStart === -1) curStart = i;
+    } else if (curStart !== -1) {
+      const len = i - curStart;
+      if (len > bestLen) { bestLen = len; bestStart = curStart; }
+      curStart = -1;
+    }
   }
-  if (firstIdx === -1) return null;
-  return points.slice(firstIdx, lastIdx + 1);
+  if (bestStart === -1) return null;
+  return points.slice(bestStart, bestStart + bestLen);
 }
 
 // 台風の強さ（気象庁の階級）：最大風速(kt)に対応
